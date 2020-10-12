@@ -165,7 +165,6 @@ class Triangle:
         self._vertexs = [ver1, ver2, ver3]
         self._ver_ids = [index1, index2, index3]
         normal_count = np.cross((ver2 - ver1).to_ndarray(), (ver2 - ver3).to_ndarray())  # 叉乘
-        logger.debug(normal_count)
         if normal is not None:
             mid: np.ndarray = np.cross(normal_count, normal.to_ndarray())  # 如果平行,此矩阵应该为[0,0,0]
             assert not any(mid), ErrorNormal
@@ -239,6 +238,11 @@ class Plane:
         """
         return self._center
 
+    def __str__(self):
+        return f"Center:{self._center},Normal:{self._normal}"
+
+    def __repr__(self):
+        return f'<{self.__module__}.{type(self).__name__} object at {hex(id(self))}><{self.__str__()}>'
 
 class GeomObjectIn(abc.ABC):
     """
