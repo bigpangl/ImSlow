@@ -191,6 +191,12 @@ class Triangle:
     def Normal(self) -> XYZ:
         return self._normal
 
+    def __str__(self):
+        return f"{self._vertexs}"
+
+    def __repr__(self):
+        return f'<{self.__module__}.{type(self).__name__} object at {hex(id(self))}><{self.__str__()}>'
+
 
 class Plane:
     """
@@ -250,7 +256,7 @@ class GeomObjectIn(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def Triangles(self) -> [FunctionType, MethodType]:
+    def Triangles(self) -> List[Triangle]:
         """
         返回该几何体所有的三角形信息
         :return:
@@ -265,3 +271,47 @@ class GeomObjectIn(abc.ABC):
         :return:
         """
         pass
+
+
+class MeshGeom(GeomObjectIn):
+    """
+    这个是用于通过点面法向量导入模型的工具
+    """
+    _vertexs: Dict[XYZ, int]
+    _triangele: List[Triangle]
+    _normals: List[XYZ]
+    _vertex_list_cache: List[XYZ]
+
+    def __init__(self, vertexs: Dict[XYZ, int], triangels: List[List[int]], normals: List[XYZ]):
+        self._vertexs = vertexs
+        self._normals = normals
+        self._vertex_list_cache = list(self._vertexs.keys())
+
+        triangle_mid: List[Triangle] = []
+        for count in range(len(triangels)):
+            angle: List[int] = triangels[count]
+
+            tmp_angle: Triangle = Triangle(
+                self._vertex_list_cache[angle[0]],
+                self._vertex_list_cache[angle[1]],
+                self._vertex_list_cache[angle[2]],
+                angle[0],  # 序号
+                angle[1],
+                angle[2],
+                self._normals[count]
+            )
+            triangle_mid.append(tmp_angle)
+
+        self._triangele = triangle_mid
+
+    @property
+    def Vertexs(self) -> List[XYZ]:
+        return self._vertex_list_cache
+
+    @property
+    def Triangles(self) -> List[Triangle]:
+        return self._triangele
+
+    @property
+    def Normals(self):
+        return self._normals
