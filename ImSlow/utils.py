@@ -105,7 +105,6 @@ def out_triangles(geom: GeomObjectIn, tree: BSPTree) -> List[Triangle]:
                         break
                 else:
                     raise Exception("不应该有此种情况")
-    logger.debug(f"out_angles:{len(back_angles)}")
     return back_angles
 
 
@@ -188,11 +187,15 @@ def in_triangles(geom: GeomObjectIn, tree: BSPTree) -> List[Triangle]:
                         node = node.downp
                 else:
                     raise Exception("不应该有此种情况")
-    logger.debug(f"in_angles:{len(back_angles)}")
     return back_angles
 
 
 class BooleanOperationUtils:
+    """
+
+    几何体布尔运算
+
+    """
 
     @classmethod
     def execute_boolean_operation(cls, geom1: GeomObjectIn, geom2: GeomObjectIn,
@@ -212,9 +215,6 @@ class BooleanOperationUtils:
             angles.extend(in_triangles(geom1, bsp_tree))
         else:
             angles.extend(out_triangles(geom1, bsp_tree))
-        # TODO 输出检测
-        for angle in angles:
-            logger.debug(f"angle:{angle}")
         bsp_tree1: BSPTree = BSPTree.create_from_geom(geom1)
 
         if operation == BooleanOperation.Union:
