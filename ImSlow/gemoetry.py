@@ -9,7 +9,7 @@ Python:     python3.6
 import abc
 import logging
 import math
-
+from struct import pack, unpack
 from typing import List, Dict
 from types import FunctionType, MethodType
 
@@ -173,7 +173,18 @@ class XYZ:
         return np.array(self.to_list(), dtype=np.float)
 
     def __hash__(self):
-        logger.debug(f"调用hash算法")
+        """
+        如何hash 处理相同的坐标点,在不是同一个对象的情况下
+        :return:
+        """
+        # logger.debug(f"调用hash算法")
+        # datas = [self.X, self.Y, self.Z]
+        # for data in datas:
+        #     logger.debug("==")
+        #     data: bytes = pack('f', data)
+        #     for i in range(len(data)):
+        #         logger.debug(data[i])
+
         return super(XYZ, self).__hash__()
 
 
@@ -215,7 +226,6 @@ class Triangle:
     @property
     def Normal(self) -> XYZ:
         return self._normal
-
 
     def __str__(self):
         return f"{self._vertexs}"

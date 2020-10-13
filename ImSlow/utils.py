@@ -248,5 +248,5 @@ class BooleanOperationUtils:
                 angles_index.append(vertexs[point])
             triangles.append(angles_index)
             normals.append(angle.Normal)
-
+        logger.debug(len(angles))
         return MeshGeom(vertexs, triangles, normals)
