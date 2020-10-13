@@ -150,8 +150,9 @@ class IMSlowTest(unittest.TestCase):
 
         box_new = BooleanOperationUtils.execute_boolean_operation(box1, box2, BooleanOperation.Difference)  # 交
         box_new = BooleanOperationUtils.execute_boolean_operation(box_new, box3, BooleanOperation.Difference)  # 交
-        for angle in box_new.Triangles:
-            logging.debug(angle)
+        logging.debug(len(box_new.Triangles))
+        # for angle in box_new.Triangles:
+        #     logging.debug(angle)
         tree = BSPTree.create_from_geom(box_new)
         self.assertEqual(tree.check_in(XYZ(10, 10, 10)), False, "校验失败")
         self.assertEqual(tree.check_in(XYZ(12, 12, 12)), False, "校验失败")
