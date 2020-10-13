@@ -7,139 +7,52 @@ Python:     python3.6
 
 """
 import logging
+import unittest
 from typing import List
 from types import FunctionType, MethodType
 from inspect import isgeneratorfunction
 import numpy as np
 
-from ImSlow.gemoetry import XYZ, Triangle, Plane, MeshGeom
+from ImSlow.gemoetry import XYZ, Triangle, Plane, MeshGeom, Line, BoundingBox
 from ImSlow.tree import BSPTree
+from ImSlow.utils import BooleanOperation, BooleanOperationUtils
 
 logging.basicConfig(level=logging.DEBUG)
 
-a = XYZ(0, 0, 0)
-b = XYZ(0, 10, 0)
-c = XYZ(10, 10, 0)
-d = XYZ(10, 0, 0)
 
-a2 = XYZ(0, 0, 10)
-b2 = XYZ(0, 10, 10)
-c2 = XYZ(10, 10, 10)
-d2 = XYZ(10, 0, 10)
+class IMSlowTest(unittest.TestCase):
 
-a3 = XYZ(20, 0, 0)
-b3 = XYZ(20, 10, 0)
-c3 = XYZ(30, 10, 0)
-d3 = XYZ(30, 0, 0)
+    def test_plane_check_in(self):
+        plane = Plane(XYZ(5, 5, 0), XYZ(-1, 0, 0))
+        check_point = XYZ(5, 5, 0)
+        status = plane.check_in(check_point)
+        self.assertEqual(status, 0, f"点{check_point} 应该在平面{plane}上")
 
-a4 = XYZ(20, 0, 10)
-b4 = XYZ(20, 10, 10)
-c4 = XYZ(30, 10, 10)
-d4 = XYZ(30, 0, 10)
+    def test_intersection(self):
+        """
+        测试交点是否正确
+        :return:
+        """
+        plane = Plane(XYZ(1, 1, 0), XYZ(0, 0, 1))
+        point: XYZ = plane.intersection(Line(XYZ(0, 0, 1), XYZ(0, 0, -1)))
 
-vertexs = {
-    a: 0,
-    b: 1,
-    c: 2,
-    d: 3,
-    a2: 4,
-    b2: 5,
-    c2: 6,
-    d2: 7,
+    def test_boundingbox(self):
+        box = BoundingBox(XYZ(0, 0, 0), XYZ(10, 10, 10))
 
-    a3: 8,
-    b3: 9,
-    c3: 10,
-    d3: 11,
+        tree = BSPTree.create_from_geom(box)
+        self.assertEqual(tree.check_in(XYZ(0, 0, 0)), True, "校验错误")
+        self.assertEqual(tree.check_in(XYZ(5, 5, 5)), True, "校验错误")
+        self.assertEqual(tree.check_in(XYZ(10, 0, 0)), True, "校验错误")
+        self.assertEqual(tree.check_in(XYZ(11, 0, 0)), False, "校验错误")
 
-    a4: 12,
-    b4: 13,
-    c4: 14,
-    d4: 15
-}
+        self.assertEqual(tree.check_in(XYZ(-1, 0, 0)), False, "校验错误")
 
-angles = [
-    [0, 1, 2],
-    [0, 2, 3],
-
-    [4, 5, 6],
-    [4, 6, 7],
-
-    [1, 2, 6],
-    [1, 6, 5],
-
-    [2, 6, 7],
-    [2, 7, 3],
-
-    [0, 1, 5],
-    [0, 5, 4],
-
-    [0, 3, 7],
-    [0, 7, 4],
-
-#
-
-    [8, 9, 10],
-    [0+8, 2+8, 3+8],
-
-    [4+8, 5+8, 6+8],
-    [4+8, 6+8, 7+8],
-
-    [1+8, 2+8, 6+8],
-    [1+8, 6+8, 5+8],
-
-    [2+8, 6+8, 7+8],
-    [2+8, 7+8, 3+8],
-
-    [0+8, 1+8, 5+8],
-    [0+8, 5+8, 4+8],
-
-    [0+8, 3+8, 7+8],
-    [0+8, 7+8, 4+8],
-]
-
-normals = [
-    XYZ(0, 0, -1),
-    XYZ(0, 0, -1),
-
-    XYZ(0, 0, 1),
-    XYZ(0, 0, 1),
-    XYZ(0, 1, 0),
-    XYZ(0, 1, 0),
-    XYZ(1, 0, 0),
-    XYZ(1, 0, 0),
-    XYZ(-1, 0, 0),
-    XYZ(-1, 0, 0),
-    XYZ(0, -1, 0),
-    XYZ(0, -1, 0),
-    XYZ(0, 0, -1),
-    XYZ(0, 0, -1),
-    XYZ(0, 0, 1),
-    XYZ(0, 0, 1),
-    XYZ(0, 1, 0),
-    XYZ(0, 1, 0),
-    XYZ(1, 0, 0),
-    XYZ(1, 0, 0),
-    XYZ(-1, 0, 0),
-    XYZ(-1, 0, 0),
-    XYZ(0, -1, 0),
-    XYZ(0, -1, 0),
-
-]
-mesh_geom = MeshGeom(vertexs, angles, normals)
-
-logging.debug(f"顶点数据:{mesh_geom.Vertexs}")
-logging.debug(f"三角形数据:{mesh_geom.Triangles}")
-logging.debug(f"法向量数据:{mesh_geom.Normals}")
+    # @unittest.skip("未完善相关功能")
+    def test_boolean(self):
+        box = BoundingBox(XYZ(0, 0, 0), XYZ(10, 10, 10))
+        box2 = BoundingBox(XYZ(5, 5, 5), XYZ(15, 15, 15))
+        BooleanOperationUtils.execute_boolean_operation(box, box2, BooleanOperation.Intersect)  # 相交
 
 
-vertexs_d: List[XYZ] = mesh_geom.Vertexs
-angles_: List[Triangle] = mesh_geom.Triangles
-normals: List[XYZ] = mesh_geom.Normals
-bsptree = BSPTree()
-for angle in angles_:
-    bsptree.append(angle)
-
-logging.debug(bsptree)
-
-logging.debug(bsptree.check_in(XYZ(20,0,0)))
+if __name__ == '__main__':
+    unittest.main()

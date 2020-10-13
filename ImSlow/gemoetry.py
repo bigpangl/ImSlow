@@ -113,6 +113,27 @@ class XYZ:
         length = self.Length
         return XYZ(self.X / length, self.Y / length, self.Z / length)
 
+    def angle_to_xyz(self, point: "XYZ") -> float:
+        """
+        计算两个向量的角度
+        :param point:
+        :return:
+        """
+        radian = self.radian_to_xyz(point)
+        return (radian / math.pi) * 180
+
+    def radian_to_xyz(self, point: "XYZ") -> float:
+        """
+        返回两个向量夹角的弧度
+        :param point:
+        :return:
+        """
+        a = self.to_ndarray()
+        b = point.to_ndarray()
+        cos_angle = a.dot(b) / (np.linalg.norm(a) * np.linalg.norm(b))
+        radian = math.acos(cos_angle)
+        return radian
+
     def cross_product(self, v_in: "XYZ") -> "XYZ":
         """
         求法向量,命令参照于revit XYZ 对象
@@ -164,13 +185,14 @@ class Triangle:
                  normal: XYZ = None):
         self._vertexs = [ver1, ver2, ver3]
         self._ver_ids = [index1, index2, index3]
-        normal_count = np.cross((ver2 - ver1).to_ndarray(), (ver2 - ver3).to_ndarray())  # 叉乘
+
+        normal_count: np.ndarray = np.cross((ver2 - ver1).to_ndarray(), (ver2 - ver3).to_ndarray())  # 叉乘
         if normal is not None:
             mid: np.ndarray = np.cross(normal_count, normal.to_ndarray())  # 如果平行,此矩阵应该为[0,0,0]
             assert not any(mid), ErrorNormal
-            normal_count = normal
+            normal_count = normal.to_ndarray()
 
-        self._normal = normal_count
+        self._normal = XYZ(normal_count[0], normal_count[1], normal_count[2])
 
     # 判断求出的法向量和传入的发向量是否平行
 
@@ -197,6 +219,26 @@ class Triangle:
         return f'<{self.__module__}.{type(self).__name__} object at {hex(id(self))}><{self.__str__()}>'
 
 
+class Line:
+    """
+    定义线条
+    """
+    _start: XYZ
+    _end: XYZ
+
+    def __init__(self, start: XYZ, end: XYZ):
+        self._start = start
+        self._end = end
+
+    @property
+    def Start(self) -> XYZ:
+        return self._start
+
+    @property
+    def End(self) -> XYZ:
+        return self._end
+
+
 class Plane:
     """
     定义一个平面
@@ -210,17 +252,26 @@ class Plane:
         :param center:
         :param normal:
         """
-
+        assert isinstance(center, XYZ), Exception
+        assert isinstance(normal, XYZ), Exception
         self._center = center
         self._normal = normal
 
-    def check_in(self, xyz: XYZ) -> float:
+    def check_in(self, xyz: XYZ, value_check=1e-10) -> float:
         """
         检测一个点是否在平面上,0 表示在其上,大于0 和小于0 分别表示两个方向
+        施加精度限制
+
         :return:
         """
-        return self._normal.X * (xyz.X - self._center.X) + self._normal.Y * (
+        value = self._normal.X * (xyz.X - self._center.X) + self._normal.Y * (
                 xyz.Y - self._center.Y) + self._normal.Z * (xyz.Z - self._center.Z)
+        if value > 0:
+            value = value if value > value_check else 0
+        else:
+            value = value if value < -value_check else 0
+
+        return value
 
     @property
     def Normal(self) -> XYZ:
@@ -243,6 +294,49 @@ class Plane:
 
     def __repr__(self):
         return f'<{self.__module__}.{type(self).__name__} object at {hex(id(self))}><{self.__str__()}>'
+
+    def project(self, point: XYZ) -> XYZ:
+        """
+        求点到直线的垂点
+        :param point:
+        :return:
+        """
+        v = self._center - point
+
+        radian = v.radian_to_xyz(self._normal)
+
+        v_new: XYZ = self._normal.normal_size() * (v.Length * math.cos(radian))
+        project_point: XYZ = point + v_new
+        return project_point
+
+    def intersection(self, line: Line) -> XYZ:
+        """
+        求平面和直线的交点
+
+        注意,此处的交点会因为计算误差,存在一定的差异,会导致计算出来的点,不完全在该平面上,所以内部引入了一个误差值做校验
+
+        :param line:
+        :return:
+        """
+        use_point: XYZ = None
+        another_point: XYZ = None
+        if self.check_in(line.Start):
+            use_point = line.Start
+            another_point = line.End
+        else:
+            use_point = line.End
+            another_point = line.Start
+
+        project_point: XYZ = self.project(use_point)  # 点到平面的垂点
+        v_line: XYZ = another_point - use_point  # 直线的向量
+        v_project: XYZ = project_point - use_point
+        radian = v_line.radian_to_xyz(v_project)  # 夹角的弧度
+        v_line_length = v_project.Length / math.cos(radian)
+        intersection_point: XYZ = use_point + v_line.normal_size() * v_line_length  #
+        check_value = abs(self.check_in(intersection_point))
+        assert check_value <= 1e-10, f"计算出来的交点不在平面上,status:{check_value},point:{intersection_point}"  # 确定该点在交点上
+        return intersection_point
+
 
 class GeomObjectIn(abc.ABC):
     """
@@ -319,3 +413,55 @@ class MeshGeom(GeomObjectIn):
     @property
     def Normals(self):
         return self._normals
+
+
+class BoundingBox(GeomObjectIn):
+    """
+    包围框样式的障碍物几何体
+    """
+    _vertexs: Dict[XYZ, int]
+    _triangele: List[Triangle]
+    _vertex_list_cache: List[XYZ]
+    def __init__(self, start: XYZ, end: XYZ):
+        self._vertexs = {
+            start: 0,
+            XYZ(end.X, start.Y, start.Z): 1,
+            XYZ(end.X, end.Y, start.Z): 2,
+            XYZ(start.X, end.Y, start.Z): 3,
+            XYZ(start.X, start.Y, end.Z): 4,
+            XYZ(end.X, start.Y, end.Z): 5,
+            end: 6,
+            XYZ(start.X, end.Y, end.Z): 7
+        }
+        self._vertex_list_cache = list(self._vertexs.keys())
+        self._triangele = [
+            Triangle(self._vertex_list_cache[0], self._vertex_list_cache[1], self._vertex_list_cache[2], normal=XYZ(0, 0, -1)),
+            Triangle(self._vertex_list_cache[0], self._vertex_list_cache[2], self._vertex_list_cache[3], normal=XYZ(0, 0, -1)),
+
+            Triangle(self._vertex_list_cache[4], self._vertex_list_cache[5], self._vertex_list_cache[6], normal=XYZ(0, 0, 1)),
+            Triangle(self._vertex_list_cache[4], self._vertex_list_cache[6], self._vertex_list_cache[7], normal=XYZ(0, 0, 1)),
+
+            Triangle(self._vertex_list_cache[1], self._vertex_list_cache[2], self._vertex_list_cache[6], normal=XYZ(1, 0, 0)),
+            Triangle(self._vertex_list_cache[1], self._vertex_list_cache[6], self._vertex_list_cache[5], normal=XYZ(1, 0, 0)),
+
+            Triangle(self._vertex_list_cache[0], self._vertex_list_cache[3], self._vertex_list_cache[7], normal=XYZ(-1, 0, 0)),
+            Triangle(self._vertex_list_cache[0], self._vertex_list_cache[7], self._vertex_list_cache[4], normal=XYZ(-1, 0, 0)),
+
+            Triangle(self._vertex_list_cache[0], self._vertex_list_cache[1], self._vertex_list_cache[5], normal=XYZ(0, -1, 0)),
+            Triangle(self._vertex_list_cache[0], self._vertex_list_cache[5], self._vertex_list_cache[4], normal=XYZ(0, -1, 0)),
+
+            Triangle(self._vertex_list_cache[3], self._vertex_list_cache[2], self._vertex_list_cache[6], normal=XYZ(0, 1, 0)),
+            Triangle(self._vertex_list_cache[3], self._vertex_list_cache[6], self._vertex_list_cache[7], normal=XYZ(0, 1, 0)),
+        ]
+
+    @property
+    def Vertexs(self) -> List[XYZ]:
+        return list(self._vertexs.keys())
+
+    @property
+    def Triangles(self) -> List[Triangle]:
+        return self._triangele
+
+    @property
+    def Normals(self) -> List[XYZ]:
+        return [angle.Normal for angle in self._triangele]
