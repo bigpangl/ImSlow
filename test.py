@@ -47,11 +47,26 @@ class IMSlowTest(unittest.TestCase):
 
         self.assertEqual(tree.check_in(XYZ(-1, 0, 0)), False, "校验错误")
 
-    # @unittest.skip("未完善相关功能")
     def test_boolean(self):
         box = BoundingBox(XYZ(0, 0, 0), XYZ(10, 10, 10))
         box2 = BoundingBox(XYZ(5, 5, 5), XYZ(15, 15, 15))
-        BooleanOperationUtils.execute_boolean_operation(box, box2, BooleanOperation.Intersect)  # 相交
+
+        geom: MeshGeom = BooleanOperationUtils.execute_boolean_operation(box, box2, BooleanOperation.Union)  # 并
+        tree = BSPTree.create_from_geom(geom)
+        self.assertEqual(tree.check_in(XYZ(10, 10, 10)), True, "校验失败")
+        self.assertEqual(tree.check_in(XYZ(12, 12, 12)), True, "校验失败")
+        self.assertEqual(tree.check_in(XYZ(-1, 12, 12)), False, "校验失败")
+
+        geom: MeshGeom = BooleanOperationUtils.execute_boolean_operation(box, box2, BooleanOperation.Intersect)  # 交
+        tree = BSPTree.create_from_geom(geom)
+        self.assertEqual(tree.check_in(XYZ(3, 3, 3)), False, "校验失败")
+        self.assertEqual(tree.check_in(XYZ(8, 8, 8)), True, "校验失败")
+
+        # TODO 此处异处理失败
+        geom = BooleanOperationUtils.execute_boolean_operation(box, box2, BooleanOperation.Difference)  # 异
+        tree = BSPTree.create_from_geom(geom)
+        self.assertEqual(tree.check_in(XYZ(8, 8, 8)), False, "校验失败")
+        self.assertEqual(tree.check_in(XYZ(3, 3, 3)), True, "校验失败")
 
 
 if __name__ == '__main__':

@@ -85,7 +85,6 @@ class BSPTree:
                         line: Line
                         cross_mid = node.plane.intersection(line)
                         cross_points.append(cross_mid)
-                    logger.debug(f"交点:{cross_points}")
                     # 得到了交点
                     if len(cross_points) == 1:  # 一个交点,说明一个点在平面上，内外点各一个
                         ange_new_out = Triangle(on_point[0], out_point[0], cross_points[0],
@@ -162,5 +161,4 @@ class BSPTree:
         bsp_tree: BSPTree = BSPTree()
         for angle in angles_:
             bsp_tree.append(angle)
-
         return bsp_tree

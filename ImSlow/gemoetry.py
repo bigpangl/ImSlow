@@ -172,6 +172,10 @@ class XYZ:
         """
         return np.array(self.to_list(), dtype=np.float)
 
+    def __hash__(self):
+        logger.debug(f"调用hash算法")
+        return super(XYZ, self).__hash__()
+
 
 class Triangle:
     """
@@ -211,6 +215,7 @@ class Triangle:
     @property
     def Normal(self) -> XYZ:
         return self._normal
+
 
     def __str__(self):
         return f"{self._vertexs}"
@@ -422,6 +427,7 @@ class BoundingBox(GeomObjectIn):
     _vertexs: Dict[XYZ, int]
     _triangele: List[Triangle]
     _vertex_list_cache: List[XYZ]
+
     def __init__(self, start: XYZ, end: XYZ):
         self._vertexs = {
             start: 0,
@@ -435,23 +441,35 @@ class BoundingBox(GeomObjectIn):
         }
         self._vertex_list_cache = list(self._vertexs.keys())
         self._triangele = [
-            Triangle(self._vertex_list_cache[0], self._vertex_list_cache[1], self._vertex_list_cache[2], normal=XYZ(0, 0, -1)),
-            Triangle(self._vertex_list_cache[0], self._vertex_list_cache[2], self._vertex_list_cache[3], normal=XYZ(0, 0, -1)),
+            Triangle(self._vertex_list_cache[0], self._vertex_list_cache[1], self._vertex_list_cache[2],
+                     normal=XYZ(0, 0, -1)),
+            Triangle(self._vertex_list_cache[0], self._vertex_list_cache[2], self._vertex_list_cache[3],
+                     normal=XYZ(0, 0, -1)),
 
-            Triangle(self._vertex_list_cache[4], self._vertex_list_cache[5], self._vertex_list_cache[6], normal=XYZ(0, 0, 1)),
-            Triangle(self._vertex_list_cache[4], self._vertex_list_cache[6], self._vertex_list_cache[7], normal=XYZ(0, 0, 1)),
+            Triangle(self._vertex_list_cache[4], self._vertex_list_cache[5], self._vertex_list_cache[6],
+                     normal=XYZ(0, 0, 1)),
+            Triangle(self._vertex_list_cache[4], self._vertex_list_cache[6], self._vertex_list_cache[7],
+                     normal=XYZ(0, 0, 1)),
 
-            Triangle(self._vertex_list_cache[1], self._vertex_list_cache[2], self._vertex_list_cache[6], normal=XYZ(1, 0, 0)),
-            Triangle(self._vertex_list_cache[1], self._vertex_list_cache[6], self._vertex_list_cache[5], normal=XYZ(1, 0, 0)),
+            Triangle(self._vertex_list_cache[1], self._vertex_list_cache[2], self._vertex_list_cache[6],
+                     normal=XYZ(1, 0, 0)),
+            Triangle(self._vertex_list_cache[1], self._vertex_list_cache[6], self._vertex_list_cache[5],
+                     normal=XYZ(1, 0, 0)),
 
-            Triangle(self._vertex_list_cache[0], self._vertex_list_cache[3], self._vertex_list_cache[7], normal=XYZ(-1, 0, 0)),
-            Triangle(self._vertex_list_cache[0], self._vertex_list_cache[7], self._vertex_list_cache[4], normal=XYZ(-1, 0, 0)),
+            Triangle(self._vertex_list_cache[0], self._vertex_list_cache[3], self._vertex_list_cache[7],
+                     normal=XYZ(-1, 0, 0)),
+            Triangle(self._vertex_list_cache[0], self._vertex_list_cache[7], self._vertex_list_cache[4],
+                     normal=XYZ(-1, 0, 0)),
 
-            Triangle(self._vertex_list_cache[0], self._vertex_list_cache[1], self._vertex_list_cache[5], normal=XYZ(0, -1, 0)),
-            Triangle(self._vertex_list_cache[0], self._vertex_list_cache[5], self._vertex_list_cache[4], normal=XYZ(0, -1, 0)),
+            Triangle(self._vertex_list_cache[0], self._vertex_list_cache[1], self._vertex_list_cache[5],
+                     normal=XYZ(0, -1, 0)),
+            Triangle(self._vertex_list_cache[0], self._vertex_list_cache[5], self._vertex_list_cache[4],
+                     normal=XYZ(0, -1, 0)),
 
-            Triangle(self._vertex_list_cache[3], self._vertex_list_cache[2], self._vertex_list_cache[6], normal=XYZ(0, 1, 0)),
-            Triangle(self._vertex_list_cache[3], self._vertex_list_cache[6], self._vertex_list_cache[7], normal=XYZ(0, 1, 0)),
+            Triangle(self._vertex_list_cache[3], self._vertex_list_cache[2], self._vertex_list_cache[6],
+                     normal=XYZ(0, 1, 0)),
+            Triangle(self._vertex_list_cache[3], self._vertex_list_cache[6], self._vertex_list_cache[7],
+                     normal=XYZ(0, 1, 0)),
         ]
 
     @property
