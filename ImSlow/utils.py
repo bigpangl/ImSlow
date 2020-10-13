@@ -13,7 +13,7 @@ from typing import List, Dict
 from enum import Enum
 import logging
 
-from .gemoetry import GeomObjectIn, Triangle, XYZ, Line, MeshGeom
+from .gemoetry import GeomObjectIn, Triangle, XYZ, Line, MeshGeom, Plane
 from .tree import BSPTree, BSPNode
 
 logger = logging.getLogger(__name__)
@@ -73,22 +73,23 @@ def out_triangles(geom: GeomObjectIn, tree: BSPTree) -> List[Triangle]:
                                             normal=angle.Normal)  # 新的三角面
                     ange_new_in = Triangle(on_point[0], in_point[0], cross_points[0], normal=angle.Normal)
 
-                    back_angles.append(ange_new_in)
-                    back_angles.append(ange_new_out)
+                    use_angles.append(ange_new_in)
+                    use_angles.append(ange_new_out)
 
                 elif len(cross_points) == 2:  # 两个交点,分居两侧
                     # out angle
-                    back_angles.append(Triangle(out_point[0], cross_points[0], cross_points[1], normal=angle.Normal))
+                    use_angles.append(Triangle(out_point[0], cross_points[0], cross_points[1], normal=angle.Normal))
                     if len(out_point) == 2:  # 两个外部点
-                        back_angles.append(Triangle(out_point[0], out_point[1], cross_points[1]))
+                        use_angles.append(Triangle(out_point[0], out_point[1], cross_points[1]))
 
                     # in angle
-                    back_angles.append(Triangle(in_point[0], cross_points[0], cross_points[1], normal=angle.Normal))
+                    use_angles.append(Triangle(in_point[0], cross_points[0], cross_points[1], normal=angle.Normal))
                     if len(in_point) == 2:
-                        back_angles.append(Triangle(in_point[0], in_point[1], cross_points[1], normal=angle.Normal))
+                        use_angles.append(Triangle(in_point[0], in_point[1], cross_points[1], normal=angle.Normal))
                 else:
                     raise Exception
                 break
+
 
             else:  # 未被当前节点分割,需要继续找后续的节点
                 if len(out_point) > 0:  # 平面外侧
@@ -154,19 +155,19 @@ def in_triangles(geom: GeomObjectIn, tree: BSPTree) -> List[Triangle]:
                                             normal=angle.Normal)  # 新的三角面
                     ange_new_in = Triangle(on_point[0], in_point[0], cross_points[0], normal=angle.Normal)
 
-                    back_angles.append(ange_new_in)
-                    back_angles.append(ange_new_out)
+                    use_angles.append(ange_new_in)
+                    use_angles.append(ange_new_out)
 
                 elif len(cross_points) == 2:  # 两个交点,分居两侧
                     # out angle
-                    back_angles.append(Triangle(out_point[0], cross_points[0], cross_points[1], normal=angle.Normal))
+                    use_angles.append(Triangle(out_point[0], cross_points[0], cross_points[1], normal=angle.Normal))
                     if len(out_point) == 2:  # 两个外部点
-                        back_angles.append(Triangle(out_point[0], out_point[1], cross_points[1]))
+                        use_angles.append(Triangle(out_point[0], out_point[1], cross_points[1]))
 
                     # in angle
-                    back_angles.append(Triangle(in_point[0], cross_points[0], cross_points[1], normal=angle.Normal))
+                    use_angles.append(Triangle(in_point[0], cross_points[0], cross_points[1], normal=angle.Normal))
                     if len(in_point) == 2:
-                        back_angles.append(Triangle(in_point[0], in_point[1], cross_points[1], normal=angle.Normal))
+                        use_angles.append(Triangle(in_point[0], in_point[1], cross_points[1], normal=angle.Normal))
                 else:
                     raise Exception
                 break
@@ -211,7 +212,9 @@ class BooleanOperationUtils:
             angles.extend(in_triangles(geom1, bsp_tree))
         else:
             angles.extend(out_triangles(geom1, bsp_tree))
-
+        # TODO 输出检测
+        for angle in angles:
+            logger.debug(f"angle:{angle}")
         bsp_tree1: BSPTree = BSPTree.create_from_geom(geom1)
 
         if operation == BooleanOperation.Union:
@@ -231,6 +234,7 @@ class BooleanOperationUtils:
 
             else:
                 angle_new_use = angles_new
+
             angles.extend(angle_new_use)
 
         # 处理所有的三角面,形成新的几何体
@@ -248,5 +252,4 @@ class BooleanOperationUtils:
                 angles_index.append(vertexs[point])
             triangles.append(angles_index)
             normals.append(angle.Normal)
-        logger.debug(len(angles))
         return MeshGeom(vertexs, triangles, normals)

@@ -228,7 +228,7 @@ class Triangle:
         return self._normal
 
     def __str__(self):
-        return f"{self._vertexs}"
+        return f"{self._vertexs}.Normal:{self.Normal}"
 
     def __repr__(self):
         return f'<{self.__module__}.{type(self).__name__} object at {hex(id(self))}><{self.__str__()}>'
@@ -351,6 +351,7 @@ class Plane:
         check_value = abs(self.check_in(intersection_point))
         assert check_value <= 1e-10, f"计算出来的交点不在平面上,status:{check_value},point:{intersection_point}"  # 确定该点在交点上
         return intersection_point
+
 
 
 class GeomObjectIn(abc.ABC):
