@@ -47,7 +47,12 @@ class Triangle:
     def __init__(self, points: o3d.open3d_pybind.utility.Vector3dVector, normal: np.ndarray):
         # TODO 待添加更多限制
         assert len(points) == 3, Exception("三角形初始化时,必须有三个点")
-
+        v1 = points[0] - points[1]
+        v2 = points[2] - points[1]
+        normal_count = np.cross(v2,v1)
+        normal_count = normal_count/np.linalg.norm(normal_count)
+        logger.debug(f"求出来的法向量:{normal_count}")
+        logger.debug(f"传入的法向量:{normal}")
         self._vertices = points
         self._normal = normal
 
@@ -132,7 +137,7 @@ class Plane:
             v_project: np.ndarray = project_point - end
             intersection_point: np.ndarray = end + v_line * np.linalg.norm(v_project) * np.linalg.norm(
                 v_project) / v_line.dot(v_project)
-            assert self.check_in(intersection_point)==0,Exception("交点求出来无法通过点法式平面验证")
+            assert self.check_in(intersection_point) == 0, Exception("交点求出来无法通过点法式平面验证")
             return intersection_point
 
 
@@ -248,17 +253,58 @@ class BSPTree:
         tree: BSPTree = BSPTree()
 
         for triangle_index, singe_triangle in enumerate(mesh.triangles):
+
             # 存放三角形的点
             vertices: o3d.open3d_pybind.utility.Vector3dVector = o3d.utility.Vector3dVector()
             for i in range(3):
                 vertices.append(mesh.vertices[singe_triangle[i]])
 
             triangle: Triangle = Triangle(vertices, mesh.triangle_normals[triangle_index])
-
+            v1 = triangle.Vertices[0] - triangle.Vertices[1]
+            v2 = triangle.Vertices[2] - triangle.Vertices[1]
             if tree.head is None:
                 tree.head = BSPNode(Plane(triangle.Vertices[0], triangle.Normal))
-            node_mid: BSPNode = tree.head
-            triangles_handle: List[Triangle] = [triangle]
+
+            # TODO 需要处理分割平面的信息
+            task_queue: List[Tuple[BSPNode, Triangle]] = [(tree.head, triangle)]
+            while task_queue:
+                logger.debug(f"===============")
+                node_mid, triangle_mid_use = task_queue.pop()
+
+                out_triangles, in_triangles, on_triangles = split_triangle_by_plane(triangle_mid_use,
+                                                                                    node_mid.plane)
+
+                for triangle_tmp in on_triangles:
+                    logger.debug(f"直接放入某个节点")
+                    node_mid.triangles.append(triangle_tmp)  # 这里的处理是正常的
+
+                if len(out_triangles)>0:
+                    logger.debug(f"out 一侧存在数据{len(out_triangles)},待处理")
+                    if node_mid.out_node is None:
+                        logger.debug(f"out 侧无子节点,即将自动生成子节点")
+                        # TODO mesh 三角形的法向量异常
+
+                        node_mid.out_node = BSPNode(Plane(out_triangles[0].Vertices[0], out_triangles[0].Normal))
+                        # TODO 检查一下三个点是否在该平面上
+                        for point in out_triangles[0].Vertices:
+                            logger.debug(f"检查点是否在平面内:{node_mid.out_node.plane.check_in(point)}")
+                    for triangle_tmp in out_triangles:
+                        task_queue.append((node_mid.out_node, triangle_tmp))  # 将各个子三角形添加到任务列表中等待处理
+
+                        # node_mid.out_node.triangles.append(triangle_tmp)
+                if len(in_triangles)>0:
+                    logger.debug(f"in side 一侧存在数据{len(in_triangles)},待处理")
+                    if node_mid.in_node is None:
+                        logger.debug("inside 一侧无节点,即将自动生成子节点")
+                        node_mid.in_node =BSPNode(Plane(in_triangles[0].Vertices[0],in_triangles[0].Normal))
+                        # TODO 检查一下三个点是否在该平面上
+                    for point in in_triangles[0].Vertices:
+                            logger.debug(f"检查点是否在平面内:{node_mid.in_node.plane.check_in(point)}")
+                    for triangle_tmp in in_triangles:
+                        task_queue.append((node_mid.in_node,triangle_tmp))
+            logger.debug("结束一个单个三角形存放")
+            # break
+        return tree
 
 
 class BooleanOperationUtils:

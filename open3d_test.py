@@ -16,7 +16,7 @@ from typing import List, Dict
 import open3d as o3d
 import numpy as np
 
-from open3dExp.core import Triangle, Plane, split_triangle_by_plane
+from open3dExp.core import Triangle, Plane, split_triangle_by_plane,BSPTree,BSPNode
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -69,6 +69,14 @@ class Open3dExpTestCompare(unittest.TestCase):
         logger.debug(triangle)
         logger.debug(plane)
 
+class Open3dExpTestBSPTree(unittest.TestCase):
+    """
+    测试BSPTree 生成相关
+    """
+    def test_create_bsp(self):
+        mesh: o3d.open3d_pybind.geometry.TriangleMesh = o3d.geometry.TriangleMesh.create_sphere()
+        tree = BSPTree.create_from_triangle_mesh(mesh)
+        pass
 
 # pcd = o3d.io.read_point_cloud("Human skeleton.ply")
 # o3d.visualization.draw_geometries([pcd])
