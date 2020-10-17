@@ -177,15 +177,7 @@ def in_triangles(geom: GeomObjectIn, tree: BSPTree) -> List[Triangle]:
                         break
                     else:  # 该平面外侧还有东西,非凸多面体,需要再次判断
                         node = node.upp
-                elif len(in_point) >= 0:  # 都在平面内侧,亦或者平面上重叠
-                    # TODO 如何处理重叠面？
-                    if node.downp is None:
-                        back_angles.append(angle)  # 核定该平面在内侧
-                        break
-                    else:
-                        node = node.downp
-                else:
-                    raise Exception("不应该有此种情况")
+
     return back_angles
 
 
