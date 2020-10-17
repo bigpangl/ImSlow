@@ -49,8 +49,8 @@ class Triangle:
         assert len(points) == 3, Exception("三角形初始化时,必须有三个点")
         v1 = points[0] - points[1]
         v2 = points[2] - points[1]
-        normal_count = np.cross(v2,v1)
-        normal_count = normal_count/np.linalg.norm(normal_count)
+        normal_count = np.cross(v2, v1)
+        normal_count = normal_count / np.linalg.norm(normal_count)
         logger.debug(f"求出来的法向量:{normal_count}")
         logger.debug(f"传入的法向量:{normal}")
         self._vertices = points
@@ -77,10 +77,12 @@ class Plane:
     """
     _normal: np.ndarray
     _vertice: np.ndarray
+    _error: float
 
-    def __init__(self, vertice: np.ndarray, normal: np.ndarray):
+    def __init__(self, vertice: np.ndarray, normal: np.ndarray, error: float = 1e-10):
         self._normal = normal
         self._vertice = vertice
+        self._error = error
 
     @property
     def Normal(self) -> np.ndarray:
@@ -96,7 +98,10 @@ class Plane:
         :param vertice:
         :return:
         """
-        return np.matmul(self.Normal, (vertice - self.Vertice).T)
+        # 这里会根据误差,进行判断
+        value = np.matmul(self.Normal, (vertice - self.Vertice).T)
+
+        return [0, value][abs(value) > self._error]
 
     def __str__(self):
         return f"Center:{self.Vertice},Normal:{self.Normal}"
@@ -121,15 +126,16 @@ class Plane:
         :param end:
         :return:
         """
+        back_point: np.ndarray = None
         status_start = self.check_in(start)
         status_end = self.check_in(end)
 
         if status_end == 0 and status_end == 0:
             raise Exception("整条直线都在平面上,不应该有此逻辑")
         elif status_end == 0:
-            return end
+            back_point = end
         elif status_start == 0:
-            return start
+            back_point = start
         else:
             # 通过减少中间的重复计算提高了精度,此处计算出来的点应该能确保在平面上
             project_point: np.ndarray = self.project(end)  # 点到平面的垂点
@@ -137,8 +143,8 @@ class Plane:
             v_project: np.ndarray = project_point - end
             intersection_point: np.ndarray = end + v_line * np.linalg.norm(v_project) * np.linalg.norm(
                 v_project) / v_line.dot(v_project)
-            assert self.check_in(intersection_point) == 0, Exception("交点求出来无法通过点法式平面验证")
-            return intersection_point
+            back_point = intersection_point
+        return back_point
 
 
 class BSPNode:
@@ -157,7 +163,8 @@ class BSPNode:
         self.in_node = None
 
 
-def split_triangle_by_plane(triangle: Triangle, plane: Plane) -> Tuple[List[Triangle], List[Triangle], List[Triangle]]:
+def split_triangle_by_plane(triangle: Triangle, plane: Plane, error: float = 1e-10) -> Tuple[
+    List[Triangle], List[Triangle], List[Triangle]]:
     """
     用平面切割三角形,最终得到多个碎三角形,依次分别表示在平面外，平面内，平面上的三角形
 
@@ -185,10 +192,9 @@ def split_triangle_by_plane(triangle: Triangle, plane: Plane) -> Tuple[List[Tria
             vertices_new_use_angle.append(vertice)
             other_vertices: o3d.open3d_pybind.utility.Vector3dVector = o3d.utility.Vector3dVector()
 
-            if check_status == 0:
+            if check_status == 0:  # 误差范围内的
                 vertices_on_triangle.append(vertice)
             else:
-
                 for n in range(i + 1, i + 3):
                     # 需要有一个三角行了
                     vertice_mid: np.ndarray = triangle_current.Vertices[n % 3]  # 循环取点,保证右手定则
@@ -197,12 +203,15 @@ def split_triangle_by_plane(triangle: Triangle, plane: Plane) -> Tuple[List[Tria
 
                     if (vertice_check >= 0 and check_status > 0) or (
                             vertice_check <= 0 and check_status < 0):  # 确保同侧
+                        logger.debug(f"三角形点都在同侧")
                         vertices_new_use_angle.append(vertice_mid)
 
                     else:  # 异侧,需要求交点
                         other_vertices.append(vertice_mid)
                         intersect: np.ndarray = plane.intersection(vertices_new_use_angle[0],
                                                                    vertice_mid)  # 交点
+
+                        logger.debug(f"交点:{intersect}")
                         vertices_new_use_angle.append(intersect)
 
                 other_vertices_length = len(other_vertices)
@@ -220,13 +229,16 @@ def split_triangle_by_plane(triangle: Triangle, plane: Plane) -> Tuple[List[Tria
 
                 if len(vertices_new_use_angle) == 3:
                     if check_status < 0:
+                        logger.debug(f"在平面内侧")
                         in_triangles.append(Triangle(vertices_new_use_angle, triangle_current.Normal))
                     else:
+                        logger.debug(f"在平面外侧")
                         out_triangles.append(Triangle(vertices_new_use_angle, triangle_current.Normal))
                 else:
                     raise Exception("逻辑异常：不应该出现有一个点在内侧却找不到内侧三角形")
                 break  # 至关重要的跳出
         if len(vertices_on_triangle) == 3:
+            logger.debug("单个三角形重叠于平面")
             on_triangles.append(Triangle(vertices_on_triangle, triangle_current.Normal))  # 平面上的三角形添加
 
     return out_triangles, in_triangles, on_triangles
@@ -242,7 +254,8 @@ class BSPTree:
         self.head = None
 
     @classmethod
-    def create_from_triangle_mesh(cls, mesh: o3d.open3d_pybind.geometry.TriangleMesh) -> "BSPTree":
+    def create_from_triangle_mesh(cls, mesh: o3d.open3d_pybind.geometry.TriangleMesh,
+                                  error: float = 1e-10) -> "BSPTree":
         """
         尝试基于一个TriangleMesh 生成一个BSP 树
         :param mesh:
@@ -260,8 +273,9 @@ class BSPTree:
                 vertices.append(mesh.vertices[singe_triangle[i]])
 
             triangle: Triangle = Triangle(vertices, mesh.triangle_normals[triangle_index])
-            v1 = triangle.Vertices[0] - triangle.Vertices[1]
-            v2 = triangle.Vertices[2] - triangle.Vertices[1]
+            plane_mid = Plane(triangle.Vertices[0], normal=triangle.Normal, error=error)
+            for point in triangle.Vertices:
+                logger.debug(f"检测外围点：{plane_mid.check_in(point)} ")
             if tree.head is None:
                 tree.head = BSPNode(Plane(triangle.Vertices[0], triangle.Normal))
 
@@ -278,33 +292,62 @@ class BSPTree:
                     logger.debug(f"直接放入某个节点")
                     node_mid.triangles.append(triangle_tmp)  # 这里的处理是正常的
 
-                if len(out_triangles)>0:
+                if len(out_triangles) > 0:
                     logger.debug(f"out 一侧存在数据{len(out_triangles)},待处理")
                     if node_mid.out_node is None:
                         logger.debug(f"out 侧无子节点,即将自动生成子节点")
-                        # TODO mesh 三角形的法向量异常
-
-                        node_mid.out_node = BSPNode(Plane(out_triangles[0].Vertices[0], out_triangles[0].Normal))
-                        # TODO 检查一下三个点是否在该平面上
-                        for point in out_triangles[0].Vertices:
-                            logger.debug(f"检查点是否在平面内:{node_mid.out_node.plane.check_in(point)}")
+                        node_mid.out_node = BSPNode(
+                            Plane(out_triangles[0].Vertices[0], out_triangles[0].Normal, error=error))
                     for triangle_tmp in out_triangles:
                         task_queue.append((node_mid.out_node, triangle_tmp))  # 将各个子三角形添加到任务列表中等待处理
 
-                        # node_mid.out_node.triangles.append(triangle_tmp)
-                if len(in_triangles)>0:
+                if len(in_triangles) > 0:
                     logger.debug(f"in side 一侧存在数据{len(in_triangles)},待处理")
                     if node_mid.in_node is None:
                         logger.debug("inside 一侧无节点,即将自动生成子节点")
-                        node_mid.in_node =BSPNode(Plane(in_triangles[0].Vertices[0],in_triangles[0].Normal))
-                        # TODO 检查一下三个点是否在该平面上
-                    for point in in_triangles[0].Vertices:
-                            logger.debug(f"检查点是否在平面内:{node_mid.in_node.plane.check_in(point)}")
+                        node_mid.in_node = BSPNode(
+                            Plane(in_triangles[0].Vertices[0], in_triangles[0].Normal, error=error))
                     for triangle_tmp in in_triangles:
-                        task_queue.append((node_mid.in_node,triangle_tmp))
-            logger.debug("结束一个单个三角形存放")
+                        task_queue.append((node_mid.in_node, triangle_tmp))
+            logger.debug(f"{triangle_index}:结束一个单个三角形存放")
             # break
         return tree
+
+    @classmethod
+    def to_triangle_mesh(cls, tree: "BSPTree",error:float=1e-10) -> o3d.open3d_pybind.geometry.TriangleMesh:
+        """
+        将BSP 树转换成open3d特定格式
+        :param tree:
+        :return:
+        """
+        mesh: o3d.open3d_pybind.geometry.TriangleMesh = o3d.geometry.TriangleMesh()
+        node_cache:List[BSPNode] = [tree.head]
+        while node_cache:
+            node_use:BSPNode = node_cache.pop()
+            for triangle in node_use.triangles:
+                triangle_index = []
+                for i in range(3):
+                    index = -1
+                    for v_i,vertice in enumerate(mesh.vertices):
+                        vertice:np.ndarray
+                        length = np.linalg.norm(vertice-triangle.Vertices[i])
+                        if abs(length)<=error: # 同一个点
+                            index = v_i
+                            break
+                    if index<0:
+                        mesh.vertices.append(triangle.Vertices[i])
+                        index = len(mesh.vertices)-1
+                    triangle_index.append(index)
+
+                triangle_index_np = np.asarray(triangle_index,dtype=np.int32)
+                mesh.triangles.append(triangle_index_np)
+                mesh.triangle_normals.append(triangle.Normal)
+            if node_use.out_node:
+                node_cache.append(node_use.out_node)
+            if node_use.in_node:
+                node_cache.append(node_use.in_node)
+
+        return mesh
 
 
 class BooleanOperationUtils:

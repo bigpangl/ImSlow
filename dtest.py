@@ -9,12 +9,13 @@ import numpy as np
 import open3d as o3d
 from open3dExp.core import BSPTree
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
 
-mesh: o3d.open3d_pybind.geometry.TriangleMesh = o3d.geometry.TriangleMesh.create_sphere()
+mesh: o3d.open3d_pybind.geometry.TriangleMesh = o3d.geometry.TriangleMesh.create_box(10,10,10)
 tree = BSPTree.create_from_triangle_mesh(mesh)
-
+mesh_new = BSPTree.to_triangle_mesh(tree)
+o3d.visualization.draw_geometries([mesh_new])
 # mesh_box = o3d.geometry.TriangleMesh.create_box(width=20,
 #                                                 height=1.0,
 #                                                 depth=1.0)
