@@ -1,3 +1,5 @@
 VENV
 .idea
 __pycache__
+
+*.ply
