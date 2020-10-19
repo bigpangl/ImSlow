@@ -7,6 +7,7 @@ Python:     python3.6
 
 """
 import logging
+from itertools import repeat
 import copy
 from typing import List, Dict, Tuple
 from enum import Enum
@@ -15,6 +16,8 @@ import open3d as o3d
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+STATIC_ERROR = 1e-10
 
 
 def make_normals(geom: o3d.open3d_pybind.geometry.TriangleMesh) -> None:
@@ -46,17 +49,24 @@ class Triangle:
     _vertices: o3d.open3d_pybind.utility.Vector3dVector
 
     def __init__(self, points: o3d.open3d_pybind.utility.Vector3dVector, normal: np.ndarray):
-        # TODO 待添加更多限制
         assert len(points) == 3, Exception("三角形初始化时,必须有三个点")
         self._vertices = points
         self._normal = normal
 
     @property
     def Normal(self) -> np.ndarray:
+        """
+        一个三角形的法向量
+        :return:
+        """
         return self._normal
 
     @property
     def Vertices(self) -> o3d.open3d_pybind.utility.Vector3dVector:
+        """
+        三角形的三个点
+        :return:
+        """
         return self._vertices
 
     def __str__(self):
@@ -74,17 +84,25 @@ class Plane:
     _vertice: np.ndarray
     _error: float
 
-    def __init__(self, vertice: np.ndarray, normal: np.ndarray, error: float = 1e-10):
+    def __init__(self, vertice: np.ndarray, normal: np.ndarray, error: float = STATIC_ERROR):
         self._normal = normal
         self._vertice = vertice
         self._error = error
 
     @property
     def Normal(self) -> np.ndarray:
+        """
+        法向量
+        :return:
+        """
         return self._normal
 
     @property
     def Vertice(self) -> np.ndarray:
+        """
+        平面中心点
+        :return:
+        """
         return self._vertice
 
     def check_in(self, vertice: np.ndarray) -> float:
@@ -103,15 +121,14 @@ class Plane:
 
     def project(self, vertice: np.ndarray) -> np.ndarray:
         """
-        求平面外一点到平面内一点的垂点
+        求平面外一点到平面内垂点
         :param vertice:
         :return:
         """
         v1 = self.Vertice - vertice
 
         if np.linalg.norm(v1) == 0:  # 向量长度
-            return self.Vertice
-
+            return self.Vertice  # 平面中心点即垂点
         return vertice + self.Normal * (v1.dot(self.Normal) / np.linalg.norm(self.Normal))
 
     def intersection(self, start: np.ndarray, end: np.ndarray) -> np.ndarray:
@@ -159,7 +176,7 @@ class BSPNode:
 
 
 def split_triangle_by_plane(triangle: Triangle, plane: Plane, error: float = 1e-10) -> Tuple[
-    List[Triangle], List[Triangle], List[Triangle],List[Triangle]]:
+    List[Triangle], List[Triangle], List[Triangle], List[Triangle]]:
     """
     用平面切割三角形,最终得到多个碎三角形,依次分别表示在平面外，平面内，平面上的三角形（法向量方向）
 
@@ -169,13 +186,15 @@ def split_triangle_by_plane(triangle: Triangle, plane: Plane, error: float = 1e-
 
     :param triangle:
     :param plane:
+    :param error:
     :return:
     """
-    check_triangles: List[Triangle] = [triangle]  # 形如广度搜索的分割方式
+
+    check_triangles: List[Triangle] = [triangle]  # 形如广度搜索的方式分割方式
     out_triangles: List[Triangle] = []
     in_triangles: List[Triangle] = []
-    on_same:List[Triangle] = []
-    on_diff:List[Triangle] = []
+    on_same: List[Triangle] = []
+    on_diff: List[Triangle] = []
 
     while check_triangles:
         triangle_current: Triangle = check_triangles.pop()
@@ -231,13 +250,14 @@ def split_triangle_by_plane(triangle: Triangle, plane: Plane, error: float = 1e-
                 break  # 至关重要的跳出
         if len(vertices_on_triangle) == 3:
             triangle_append = Triangle(vertices_on_triangle, triangle_current.Normal)
-            cos_value = triangle_append.Normal.dot(plane.Normal) / (np.linalg.norm(triangle_append.Normal) * np.linalg.norm(plane.Normal))
+            cos_value = triangle_append.Normal.dot(plane.Normal) / (
+                    np.linalg.norm(triangle_append.Normal) * np.linalg.norm(plane.Normal))
 
-            if abs(1-cos_value)<error:
+            if abs(1 - cos_value) < error:
                 on_same.append(triangle_append)
             else:
                 on_diff.append(triangle_append)
-    return out_triangles, in_triangles, on_same,on_diff
+    return out_triangles, in_triangles, on_same, on_diff
 
 
 class BSPTree:
@@ -250,13 +270,16 @@ class BSPTree:
         self.head = None
 
     @classmethod
-    def create_from_triangle_mesh(cls, mesh: o3d.open3d_pybind.geometry.TriangleMesh,
-                                  error: float = 1e-10) -> "BSPTree":
+    def create_from_triangle_mesh(cls, mesh: o3d.open3d_pybind.geometry.TriangleMesh, error: float = None) -> "BSPTree":
         """
         尝试基于一个TriangleMesh 生成一个BSP 树
         :param mesh:
         :return:
         """
+        if error is None:
+            error = STATIC_ERROR
+
+        logger.warning(f"BSP 树从open3d 的Triangle Mesh 中生成时,遇到三角面多时交费力,可以尝试利用Cython 加速,待尝试")
 
         make_normals(mesh)
         tree: BSPTree = BSPTree()
@@ -269,36 +292,35 @@ class BSPTree:
                 vertices.append(mesh.vertices[singe_triangle[i]])
 
             triangle: Triangle = Triangle(vertices, mesh.triangle_normals[triangle_index])
-            plane_mid = Plane(triangle.Vertices[0], normal=triangle.Normal, error=error)
+            # plane_mid = Plane(triangle.Vertices[0], normal=triangle.Normal, error=error)
             if tree.head is None:
                 tree.head = BSPNode(Plane(triangle.Vertices[0], triangle.Normal))
 
-            # TODO 需要处理分割平面的信息
-            task_queue: List[Tuple[BSPNode, Triangle]] = [(tree.head, triangle)]
+            task_queue: List[Tuple[BSPNode, Triangle]] = [(tree.head, triangle)]  # 类似于广度搜索,将各个三角形分配下去
+
             while task_queue:
                 node_mid, triangle_mid_use = task_queue.pop()
 
-                out_triangles, in_triangles, on_same,on_diff = split_triangle_by_plane(triangle_mid_use,
-                                                                                    node_mid.plane)
+                out_triangles, in_triangles, on_same, on_diff = split_triangle_by_plane(triangle_mid_use,
+                                                                                        node_mid.plane)
 
-                for triangle_tmp in on_same:
-                    node_mid.triangles.append(triangle_tmp)  # 这里的处理是正常的
-                for triangle_tmp in on_diff:
-                    node_mid.triangles.append(triangle_tmp)
+                # 以extend 替代 for 循环添加
+                node_mid.triangles.extend(on_same)  # 这里的处理是正常的
+                node_mid.triangles.extend(on_diff)
+
                 if len(out_triangles) > 0:
                     if node_mid.out_node is None:
                         node_mid.out_node = BSPNode(
                             Plane(out_triangles[0].Vertices[0], out_triangles[0].Normal, error=error))
-                    for triangle_tmp in out_triangles:
-                        task_queue.append((node_mid.out_node, triangle_tmp))  # 将各个子三角形添加到任务列表中等待处理
+
+                    task_queue.extend(zip([node_mid.out_node for _ in range(len(out_triangles))], out_triangles))
 
                 if len(in_triangles) > 0:
                     if node_mid.in_node is None:
                         node_mid.in_node = BSPNode(
                             Plane(in_triangles[0].Vertices[0], in_triangles[0].Normal, error=error))
-                    for triangle_tmp in in_triangles:
-                        task_queue.append((node_mid.in_node, triangle_tmp))
-            # break
+
+                    task_queue.extend(zip([node_mid.in_node for _ in range(len(in_triangles))], in_triangles))
         return tree
 
     @classmethod
@@ -308,50 +330,55 @@ class BSPTree:
         :param tree:
         :return:
         """
-        mesh: o3d.open3d_pybind.geometry.TriangleMesh = o3d.geometry.TriangleMesh()
-        node_cache: List[BSPNode] = [tree.head]
-        while node_cache:
-            node_use: BSPNode = node_cache.pop()
-            for triangle in node_use.triangles:
-                triangle_index = []
-                for i in range(3):
-                    index = -1
-                    for v_i, vertice in enumerate(mesh.vertices):
-                        vertice: np.ndarray
-                        length = np.linalg.norm(vertice - triangle.Vertices[i])
-                        if abs(length) <= error:  # 同一个点
-                            index = v_i
-                            break
-                    if index < 0:
-                        mesh.vertices.append(triangle.Vertices[i])
-                        index = len(mesh.vertices) - 1
-                    triangle_index.append(index)
+        logger.error("未完善BSP 导出功能,关键点在于几何体布尔运算最后的重复点计算部分")
+        raise Exception("待完善部分")
+        # mesh: o3d.open3d_pybind.geometry.TriangleMesh = o3d.geometry.TriangleMesh()
+        # node_cache: List[BSPNode] = [tree.head]
+        # while node_cache:
+        #     node_use: BSPNode = node_cache.pop()
+        #     for triangle in node_use.triangles:
+        #         triangle_index = []
+        #         for i in range(3):
+        #             index = -1
+        #             for v_i, vertice in enumerate(mesh.vertices):
+        #                 vertice: np.ndarray
+        #                 length = np.linalg.norm(vertice - triangle.Vertices[i])
+        #                 if abs(length) <= error:  # 同一个点
+        #                     index = v_i
+        #                     break
+        #             if index < 0:
+        #                 mesh.vertices.append(triangle.Vertices[i])
+        #                 index = len(mesh.vertices) - 1
+        #             triangle_index.append(index)
+        #
+        #         triangle_index_np = np.asarray(triangle_index, dtype=np.int32)
+        #         mesh.triangles.append(triangle_index_np)
+        #         mesh.triangle_normals.append(triangle.Normal)
+        #     if node_use.out_node:
+        #         node_cache.append(node_use.out_node)
+        #     if node_use.in_node:
+        #         node_cache.append(node_use.in_node)
+        #
+        # return mesh
 
-                triangle_index_np = np.asarray(triangle_index, dtype=np.int32)
-                mesh.triangles.append(triangle_index_np)
-                mesh.triangle_normals.append(triangle.Normal)
-            if node_use.out_node:
-                node_cache.append(node_use.out_node)
-            if node_use.in_node:
-                node_cache.append(node_use.in_node)
 
-        return mesh
-
-
-def split_triangle_mesh_by_bsp_tree(mesh: o3d.open3d_pybind.geometry.TriangleMesh, tree: BSPTree,
-                                    error: float = 1e-10) -> Tuple[
-    List[Triangle], List[Triangle], List[Triangle],List[Triangle]]:
+def split_triangle_mesh(mesh: o3d.open3d_pybind.geometry.TriangleMesh, tree: BSPTree,
+                        error: float = None) -> \
+        Tuple[List[List[Triangle]], List[List[Triangle]], List[List[Triangle]], List[List[Triangle]]]:
     """
     使用bsp 树分割原有的triangle_mesh,得到out_triangle,in_triangle,on_triangle
-
     :param mesh:
     :param tree:
+    :param error:
     :return:
     """
-    out_triangles: List[Triangle] = []
-    in_triangles: List[Triangle] = []
-    on_same_triangles: List[Triangle] = []
-    on_diff_triangles:List[Triangle] = []
+    if error is None:
+        error = STATIC_ERROR
+
+    out_triangles: List[List[Triangle]] = []
+    in_triangles: List[List[Triangle]] = []
+    on_same_triangles: List[List[Triangle]] = []
+    on_diff_triangles: List[List[Triangle]] = []
 
     for angle_index, mesh_angle in enumerate(mesh.triangles):
         vertices = o3d.utility.Vector3dVector()
@@ -359,39 +386,51 @@ def split_triangle_mesh_by_bsp_tree(mesh: o3d.open3d_pybind.geometry.TriangleMes
             vertices.append(mesh.vertices[mesh_angle[i]])
 
         triangle_mid = Triangle(vertices, mesh.triangle_normals[angle_index])
+
         task_queue: List[Tuple[Triangle, BSPNode, int]] = [(triangle_mid, tree.head, 0)]
         while task_queue:
             triangle_use, node_use, surface_status_use = task_queue.pop()  # 此前计算的相关信息
 
-            out_mid, in_mid, on_same_mid,on_diff_mid = split_triangle_by_plane(triangle_use, node_use.plane, error)
+            out_mid, in_mid, on_same_mid, on_diff_mid = split_triangle_by_plane(triangle_use, node_use.plane, error)
             if node_use.out_node is None:
-                out_triangles.extend(out_mid)  # 通过plane 切割,确定在几何体外部
+                out_triangles.append(out_mid)  # 通过plane 切割,确定在几何体外部
             else:
                 # 可能在内部,也可能在内部,要继续讨论
-                for out_single_trangle in out_mid:
-                    task_queue.append((out_single_trangle, node_use.out_node, False))
+                task_queue.extend(zip(
+                    out_mid,
+                    repeat(node_use.out_node),
+                    repeat(False)
+                ))
 
             if node_use.in_node is None:
-                for in_single_trangle in in_mid:
-                    if surface_status_use == 0:  # 剔除曾经在表面然后现在又在内部的三角面
-                        in_triangles.append(in_single_trangle)
-                    elif surface_status_use == 1: # 同向
-                        on_same_triangles.append(in_single_trangle)
-                    else:# 异向
-                        on_diff_triangles.append(in_single_trangle)
 
-                if on_same_mid:  # 直接就在表面且无in node
-                    on_same_triangles.extend(on_same_mid)
-                if on_diff_mid:
-                    on_diff_triangles.extend(on_diff_mid)
+                if surface_status_use == 0:  # 剔除曾经在表面然后现在又在内部的三角面
+                    in_triangles.append(in_mid)
+                elif surface_status_use == 1:  # 同向
+                    on_same_triangles.append(in_mid)
+                else:  # 异向
+                    on_diff_triangles.append(in_mid)
+
+                on_same_mid and on_same_triangles.append(on_same_mid)
+                on_diff_mid and on_diff_triangles.append(on_diff_mid)
             else:
-                for in_single_trangle in in_mid:
-                    task_queue.append((in_single_trangle, node_use.in_node, surface_status_use))
-                for on_single_trangle in on_same_mid:
-                    task_queue.append((on_single_trangle, node_use.in_node, 1))
-                for on_single_trangle in on_diff_mid:
-                    task_queue.append(((on_single_trangle,node_use.in_node,2)))
-    return out_triangles, in_triangles, on_same_triangles,on_diff_triangles
+                task_queue.extend(zip(
+                    in_mid,
+                    repeat(node_use.in_node),
+                    repeat(surface_status_use)
+                ))
+                task_queue.extend(zip(
+                    on_same_mid,
+                    repeat(node_use.in_node),
+                    repeat((1))
+                ))
+                task_queue.extend(zip(
+                    on_diff_mid,
+                    repeat(node_use.in_node),
+                    repeat(2)
+                ))
+
+    return out_triangles, in_triangles, on_same_triangles, on_diff_triangles
 
 
 class BooleanOperationUtils:
@@ -405,14 +444,11 @@ class BooleanOperationUtils:
     def execute_boolean_operation(cls, geom1: o3d.open3d_pybind.geometry.TriangleMesh,
                                   geom2: o3d.open3d_pybind.geometry.TriangleMesh,
                                   operation: BooleanOperation,
-                                  error: float = 1e-10) -> o3d.open3d_pybind.geometry.TriangleMesh:
-        """
-        对标revit 接口用法,对两个几何体取布尔运算处理
-        :param geom1:
-        :param geom2:
-        :param operation:
-        :return:
-        """
+                                  error: float = None) -> o3d.open3d_pybind.geometry.TriangleMesh:
+
+        if error is None:
+            error = STATIC_ERROR
+
         mesh: o3d.open3d_pybind.geometry.TriangleMesh = o3d.geometry.TriangleMesh()  # 这是需要返回的最终几何体
         make_normals(geom1)
         make_normals(geom2)
@@ -445,38 +481,49 @@ class BooleanOperationUtils:
         # BSP 树存储数据,广度搜索
         geom2_tree: BSPTree = BSPTree.create_from_triangle_mesh(geom2)
         geom1_tree: BSPTree = BSPTree.create_from_triangle_mesh(geom1)
-        triangles_all: List[Triangle] = []  # 存放所有的三角面片
-        out_triangles, in_triangles, on_same_triangles,on_diff_triangles = split_triangle_mesh_by_bsp_tree(geom1, geom2_tree)
-        out_triangles2, in_triangles2, on_same_triangles2,on_diff_triangles2 = split_triangle_mesh_by_bsp_tree(geom2, geom1_tree)
-        if operation == BooleanOperation.Union: # 并集
-            triangles_all.extend(out_triangles)
-            triangles_all.extend(out_triangles2)
-            triangles_all.extend(on_same_triangles)
+
+        triangles_all: List[List[List[Triangle]]] = []  # 存放所有的三角面片,多层嵌套列表Triangle
+
+        out_triangles, in_triangles, on_same_triangles, on_diff_triangles = split_triangle_mesh(geom1, geom2_tree)
+
+        out_triangles2, in_triangles2, on_same_triangles2, on_diff_triangles2 = split_triangle_mesh(geom2, geom1_tree)
+
+        if operation == BooleanOperation.Union:  # 并集
+            triangles_all.append(out_triangles)
+            triangles_all.append(out_triangles2)
+            triangles_all.append(on_same_triangles)
 
         if operation == BooleanOperation.Intersect:  # 相交部分
-            triangles_all.extend(in_triangles)
-            triangles_all.extend(in_triangles2)
-            if len(in_triangles)!=0 and len(in_triangles2)!=0: # 如果等于0，就未相交了
-                triangles_all.extend(on_same_triangles)
+            triangles_all.append(in_triangles)
+            triangles_all.append(in_triangles2)
+            if len(in_triangles) != 0 and len(in_triangles2) != 0:  # 如果等于0，就未相交了
+                triangles_all.append(on_same_triangles)
 
         if operation == BooleanOperation.Difference:  # 不同部分
 
-            triangles_all.extend(out_triangles)
+            triangles_all.append(out_triangles)
 
-            triangle_in_2: List[Triangle] = []
+            triangle_in_2: List[List[Triangle]] = []
 
             for single_triangle in in_triangles2:
-                vertices = o3d.utility.Vector3dVector()
-                vertices.append(single_triangle.Vertices[2])
-                vertices.append(single_triangle.Vertices[1])
-                vertices.append(single_triangle.Vertices[0])
-                triangle_in_2.append(Triangle(vertices, single_triangle.Normal * -1))
+                single_triangle: List[Triangle]
+                new_single_triangle: List[Triangle] = []
+                for single in single_triangle:
+                    vertices = o3d.utility.Vector3dVector()
+                    vertices.append(single.Vertices[2])
+                    vertices.append(single.Vertices[1])
+                    vertices.append(single.Vertices[0])
+                    new_single_triangle.append(Triangle(vertices, single.Normal * -1))
+                triangle_in_2.append(new_single_triangle)
 
-            triangles_all.extend(triangle_in_2)
-
-            triangles_all.extend(on_diff_triangles)
+            triangles_all.append(triangle_in_2)
+            triangles_all.append(on_diff_triangles)
 
         for final_triangle in triangles_all:
-            append(final_triangle)
+            final_triangle: List[List[Triangle]]
+            for list_triangle in final_triangle:
+                list_triangle: List[Triangle]
+                for angle in list_triangle:
+                    append(angle)
 
         return mesh
