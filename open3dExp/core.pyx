@@ -1,6 +1,7 @@
 # cython: language_level=3
 from enum import Enum
 import logging
+from typing import List
 from itertools import repeat
 from datetime import datetime
 
@@ -51,10 +52,9 @@ cdef class Plane:
 
         return [0, value][abs(value) > self.error]
 
-    cdef np.ndarray[DTYPE_f,ndim=1] project(self, np.ndarray[DTYPE_f,ndim=1] vertice):
+    cdef np.ndarray[DTYPE_f, ndim=1] project(self, np.ndarray[DTYPE_f, ndim=1] vertice):
 
-
-        cdef np.ndarray[DTYPE_f,ndim=1] v1 = self.Vertice - vertice
+        cdef np.ndarray[DTYPE_f, ndim=1] v1 = self.Vertice - vertice
 
         if np.linalg.norm(v1) == 0:  # 向量长度
             return self.Vertice  # 平面中心点即垂点
@@ -87,7 +87,7 @@ cdef class BSPNode:
     BSP 树的节点信息
     """
     cdef public Plane plane
-    cdef public triangles  # 落在切面上的三角形
+    cdef public list triangles  # 落在切面上的三角形
     cdef public BSPNode out_node  # 在几何体切面外
     cdef public BSPNode in_node  # 在几何体切面内
 
@@ -97,29 +97,20 @@ cdef class BSPNode:
         self.out_node = None
         self.in_node = None
 
-def split_triangle_by_plane(Triangle triangle, Plane plane, float error = STATIC_ERROR):
-    """
-    用平面切割三角形,最终得到多个碎三角形,依次分别表示在平面外，平面内，平面上的三角形（法向量方向）
-
-    是按照右手定则写的提取规则,提取后的三角形满足右手定则
-
-    通过初步的测试,如果传入的三角形不满足右手定则,也能正确分割,但是分割后的三角形将保持传入三角形的点顺序（顺时针or 逆时针）
-
-    :param triangle:
-    :param plane:
-    :param error:
-    :return:
-    """
+cdef tuple[list] split_triangle_by_plane(Triangle triangle, Plane plane, float error = STATIC_ERROR):
+    # 分割
     cdef Triangle triangle_current, triangle_append
     cdef int n, i, out_vertices_length, other_vertices_length
     cdef np.ndarray vertice, vertice_mid
     cdef float check_status, vertice_check, cos_value
 
-    check_triangles = [triangle]  # 形如广度搜索的方式分割方式
-    out_triangles = []
-    in_triangles = []
-    on_same = []
-    on_diff = []
+    cdef np.ndarray[DTYPE_f, ndim=2] vertices_on_triangle, vertices_new_use_angle, other_vertices
+
+    cdef list check_triangles = [triangle]  # 形如广度搜索的方式分割方式
+    cdef list out_triangles = []
+    cdef list in_triangles = []
+    cdef list on_same = []
+    cdef list on_diff = []
 
     while check_triangles:
         triangle_current = check_triangles.pop()
@@ -137,7 +128,6 @@ def split_triangle_by_plane(Triangle triangle, Plane plane, float error = STATIC
 
             if check_status == 0:  # 误差范围内的
                 vertices_on_triangle = np.append(vertices_on_triangle, [vertice], axis=0)
-                # vertices_on_triangle.append(vertice)
             else:
                 for n in range(i + 1, i + 3):
                     # 需要有一个三角行了
@@ -148,15 +138,12 @@ def split_triangle_by_plane(Triangle triangle, Plane plane, float error = STATIC
                     if (vertice_check >= 0 and check_status > 0) or (
                             vertice_check <= 0 and check_status < 0):  # 确保同侧
                         vertices_new_use_angle = np.append(vertices_new_use_angle, [vertice_mid], axis=0)
-                        # vertices_new_use_angle.append(vertice_mid)
 
                     else:  # 异侧,需要求交点
                         other_vertices = np.append(other_vertices, [vertice_mid], axis=0)
-                        # other_vertices.append(vertice_mid)
                         vertices_new_use_angle = np.append(vertices_new_use_angle,
                                                            [plane.intersection(vertices_new_use_angle[0], vertice_mid)],
                                                            axis=0)
-                        # vertices_new_use_angle.append()
 
                 other_vertices_length = len(other_vertices)
 
@@ -170,9 +157,6 @@ def split_triangle_by_plane(Triangle triangle, Plane plane, float error = STATIC
                             vertices_new_use_angle[1],
                             other_vertices[0]
                         ], dtype=np.float)
-                        # vertices_mid_.append()
-                        # vertices_mid_.append()
-                        # vertices_mid_.append()
                         check_triangles.append(Triangle(vertices_mid_, triangle_current.Normal))
                     check_triangles.append(Triangle(other_vertices, triangle_current.Normal))
 
@@ -195,7 +179,7 @@ def split_triangle_by_plane(Triangle triangle, Plane plane, float error = STATIC
                 on_diff.append(triangle_append)
     return out_triangles, in_triangles, on_same, on_diff
 
-cpdef to_triangle_mesh(iteral, float voxel_size=0.0001):
+cdef object to_triangle_mesh(iteral, float voxel_size=0.0001):
     cdef Triangle angle
     cdef int index
     cdef np.ndarray triangle_index_np
@@ -230,11 +214,12 @@ cdef class BSPTree:
 
 cdef BSPTree create_from_triangle_mesh(mesh: o3d.open3d_pybind.geometry.TriangleMesh, float error=STATIC_ERROR):
     cdef BSPTree tree
+    cdef BSPNode node_mid
     cdef Triangle triangle
     cdef int triangle_index, triangles_length
-
-    if error is None:
-        error = STATIC_ERROR
+    cdef list task_queue, out_triangles, in_triangles, on_same, on_diff
+    cdef np.ndarray[DTYPE_t, ndim=1] singe_triangle
+    cdef np.ndarray[DTYPE_f, ndim=2] vertices
 
     tree = BSPTree()
     triangles_length = len(mesh.triangles)
@@ -247,7 +232,6 @@ cdef BSPTree create_from_triangle_mesh(mesh: o3d.open3d_pybind.geometry.Triangle
             vertices = np.append(vertices, [mesh.vertices[singe_triangle[i]]], axis=0)
 
         triangle = Triangle(vertices, mesh.triangle_normals[triangle_index])
-        # plane_mid = Plane(triangle.Vertices[0], normal=triangle.Normal, error=error)
         if tree.head is None:
             tree.head = BSPNode(Plane(triangle.Vertices[0], triangle.Normal))
 
@@ -278,35 +262,16 @@ cdef BSPTree create_from_triangle_mesh(mesh: o3d.open3d_pybind.geometry.Triangle
                 task_queue.extend(zip([node_mid.in_node for _ in range(len(in_triangles))], in_triangles))
     return tree
 
-    # def iter_triangles(self):
-    #     """
-    #     以迭代器方式返回所有的三角面
-    #     :return:
-    #     """
-    #     node_cache: List[BSPNode] = [self.head]
-    #
-    #     while node_cache:
-    #         node_use: BSPNode = node_cache.pop()
-    #         for triangle in node_use.triangles:
-    #             yield triangle
-    #
-    #         if node_use.out_node:
-    #             node_cache.append(node_use.out_node)
-    #         if node_use.in_node:
-    #             node_cache.append(node_use.in_node)
-
-    # def to_triangle_mesh(self,error: float = 1e-10) -> o3d.open3d_pybind.geometry.TriangleMesh:
-    #     """
-    #     将BSP 树转换成open3d特定格式
-    #     :param tree:
-    #     :return:
-    #     """
-    #
-    #     logger.error("未完善BSP 导出功能,关键点在于几何体布尔运算最后的重复点计算部分")
-    #     return to_triangle_mesh(self.iter_triangles,error)
-
-cdef split_triangle_mesh(mesh: o3d.open3d_pybind.geometry.TriangleMesh, BSPTree tree, float error = STATIC_ERROR):
+cdef tuple[list] split_triangle_mesh(mesh: o3d.open3d_pybind.geometry.TriangleMesh, BSPTree tree,
+                                     float error = STATIC_ERROR):
     # 分割mesh
+    cdef BSPNode node_use
+    cdef list task_queue, out_triangles, in_triangles, on_same_triangles, on_diff_triangles, out_mid, in_mid, on_same_mid, on_diff_mid
+    cdef int angle_index, surface_status_use
+    cdef Triangle  triangle_mid, triangle_use
+    cdef np.ndarray[DTYPE_f, ndim=2] vertices
+    cdef np.ndarray[DTYPE_t, ndim=1] mesh_angle
+
     out_triangles = []
     in_triangles = []
     on_same_triangles = []
@@ -379,9 +344,9 @@ class BooleanOperationUtils:
                                   geom2: o3d.open3d_pybind.geometry.TriangleMesh,
                                   operation: BooleanOperation,
                                   float error= STATIC_ERROR):
-        # a =  vector[int]()
-
+        cdef np.ndarray[DTYPE_f,ndim=2] vertices
         cdef BSPTree geom2_tree, geom1_tree
+        cdef list triangles_all, out_triangles, in_triangles, on_same_triangles, on_diff_triangles, out_triangles2, in_triangles2, on_same_triangles2, on_diff_triangles2,triangle_in_2,new_single_triangle
 
         # BSP 树存储数据,广度搜索
         geom2_tree = create_from_triangle_mesh(geom2)
