@@ -5,5 +5,4 @@ __pycache__
 open3dExp/core.c
 open3dExp/core.*.pyd
 open3dExp/core.h
-open3dExp/core.html
 build
