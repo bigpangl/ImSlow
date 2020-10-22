@@ -189,14 +189,18 @@ cdef object to_triangle_mesh(iteral, float voxel_size=0.0001):
     cdef Triangle angle
     cdef int index
     cdef np.ndarray triangle_index_np
-
+    cdef np.ndarray select
     mesh = o3d.geometry.TriangleMesh()
 
     for angle in iteral:
         triangle_index = []
         for i in range(3):
-            mesh.vertices.append(angle.Vertices[i])
-            index = len(mesh.vertices) - 1
+            select  = np.where((mesh.vertices==angle.Vertices[i]).all(1))[0]
+            if len(select)>0:
+                index = select[0]
+            else:
+                mesh.vertices.append(angle.Vertices[i])
+                index = len(mesh.vertices) - 1
 
             triangle_index.append(index)
 
@@ -204,12 +208,6 @@ cdef object to_triangle_mesh(iteral, float voxel_size=0.0001):
 
         mesh.triangles.append(triangle_index_np)
         mesh.triangle_normals.append(angle.Normal)
-
-    # 使用自带的库剔除重复的顶点
-    # 此处需要注意精度保留
-    # TODO 是否需要自己去实现
-    mesh = mesh.simplify_vertex_clustering(voxel_size=voxel_size,
-                                           contraction=o3d.geometry.SimplificationContraction.Average)
     return mesh
 
 cdef class BSPTree:
