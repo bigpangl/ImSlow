@@ -5,12 +5,17 @@ from typing import List
 from itertools import repeat
 from datetime import datetime
 
+from libcpp cimport bool
+from libcpp.vector cimport vector
+
 import numpy as np
 cimport numpy as np
 from cpython.ref cimport PyObject
 # from libcpp.vector cimport vector
 
 import open3d as o3d
+
+np.import_array()
 
 ctypedef np.int_t DTYPE_t
 ctypedef np.float_t DTYPE_f
@@ -30,6 +35,7 @@ cdef class Triangle:  # 数据存储以np.ndarray
     def __cinit__(self, np.ndarray[DTYPE_f, ndim=2] points, np.ndarray[DTYPE_f, ndim=1] normal):
         self.Vertices = points
         self.Normal = normal
+
 
 cdef class Plane:
     """
