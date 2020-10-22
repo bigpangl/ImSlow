@@ -1,17 +1,13 @@
 # cython: language_level=3
 from enum import Enum
 import logging
-from typing import List
 from itertools import repeat
 from datetime import datetime
 
-from libcpp cimport bool
-from libcpp.vector cimport vector
-
-import numpy as np
 cimport numpy as np
-from cpython.ref cimport PyObject
-# from libcpp.vector cimport vector
+import numpy as np
+
+np.import_array()
 
 import open3d as o3d
 
