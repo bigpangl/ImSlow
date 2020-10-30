@@ -28,15 +28,17 @@ class BooleanOperation(Enum):
 cdef class Triangle:  # 数据存储以np.ndarray
     cdef public np.ndarray Normal
     cdef public np.ndarray Vertices
+
     def __cinit__(self, np.ndarray[DTYPE_f, ndim=2] points, np.ndarray[DTYPE_f, ndim=1] normal):
         self.Vertices = points
         self.Normal = normal
-
+    def center(self):
+        return np.mean(self.Vertices, axis=0)
+    # cdef public np.ndarray center(self):
+    #     return np.mean(self.Vertices, axis=0)
 
 cdef class Plane:
-    """
-    点法式定义平面
-    """
+    # 点法式 定义平面
     cdef public  np.ndarray Normal
     cdef public  np.ndarray Vertice
     cdef public float error
@@ -85,9 +87,7 @@ cdef class Plane:
         return back_point
 
 cdef class BSPNode:
-    """
-    BSP 树的节点信息
-    """
+    # BSP 树的节点信息
     cdef public Plane plane
     cdef public list triangles  # 落在切面上的三角形
     cdef public BSPNode out_node  # 在几何体切面外
@@ -191,8 +191,8 @@ cdef object to_triangle_mesh(iteral, float voxel_size=0.0001):
     for angle in iteral:
         triangle_index = []
         for i in range(3):
-            select  = np.where((mesh.vertices==angle.Vertices[i]).all(1))[0]
-            if len(select)>0:
+            select = np.where((mesh.vertices == angle.Vertices[i]).all(1))[0]
+            if len(select) > 0:
                 index = select[0]
             else:
                 mesh.vertices.append(angle.Vertices[i])
@@ -212,7 +212,103 @@ cdef class BSPTree:
     def __init__(self):
         self.head = None
 
+cdef Plane pca_plane(np.ndarray[DTYPE_f, ndim=2] points):
+    # 通过pca 求到拟合的平面,两边点的数量几乎类似,此处方法应该是正确的
+    cdef Plane plane
+    cdef np.ndarray[DTYPE_f, ndim=2] averages, avgs, data_adjust, featVec
+    cdef np.ndarray[DTYPE_f, ndim=1] featValue, v1, v2, normal
+    cdef np.ndarray[long long, ndim=1] index
+    cdef int m, n
+
+    average = np.mean(points, axis=0)  # 中心点
+    m, n = np.shape(points)  # N x 3
+    avgs = np.tile(average, (m, 1))
+    data_adjust = points - avgs
+    cov_x = np.cov(data_adjust.T)  # 计算协方差矩阵
+
+    featValue, featVec = np.linalg.eig(cov_x)  # 求解协方差矩阵的特征值和特征向量
+    index = np.argsort(-featValue)  # 依照featValue进行从大到小排序
+    v1 = featVec[index[0]]
+    v2 = featVec[index[1]]
+    normal = np.cross(v1, v2)
+    plane = Plane(average, normal)
+    return plane
+
+cdef BSPNode get_by_triangles(list triangles):
+    # 生成Node
+    cdef BSPNode node = None
+    cdef Plane plane
+    cdef np.ndarray[DTYPE_f, ndim=2] vertices
+    vertices = np.asarray([triangle.center() for triangle in triangles],
+                                                           dtype=np.float64)
+    if len(triangles) > 50:  # 经验数据
+        plane = pca_plane(np.asarray(vertices))
+        node = BSPNode(plane)
+
+    elif len(triangles) > 0:
+        plane = Plane(triangles[0].Vertices[0], triangles[0].Normal)
+        node = BSPNode(plane)
+    return node
+
 cdef BSPTree create_from_triangle_mesh(mesh: o3d.open3d_pybind.geometry.TriangleMesh, float error=STATIC_ERROR):
+    # 尝试基于PCA 做启发式算法的优化
+    cdef BSPTree tree  # 返回的bsp树
+    cdef BSPNode node = None  # 节点信息
+    cdef Plane plane  # 平面
+
+    cdef Triangle triangle  # 单个三角形面片
+    cdef list triangles  # 存放所有的三角形面片
+    cdef list task_queue, out_triangles, in_triangles, on_same, on_diff, out_triangles_i, in_triangles_i, on_same_i, on_diff_i  # 广度优先的插入方式时的任务队列
+    cdef int triangle_index  # 第几个三角形
+
+    task_queue = []
+    tree = BSPTree()
+    triangles = []  # 初始化,用于存放三角形
+
+    for triangle_index in range(len(mesh.triangles)):  # 遍历三角形
+        singe_triangle = mesh.triangles[triangle_index]
+        # 存放三角形的点
+        vertices = np.zeros(shape=(0, 3), dtype=np.float64)
+        for i in range(3):
+            vertices = np.append(vertices, [mesh.vertices[singe_triangle[i]]], axis=0)
+
+        triangle = Triangle(vertices, mesh.triangle_normals[triangle_index])
+        triangles.append(triangle)  # 会总处理
+
+    # 初始化一个节点,需要初始化一个平面
+
+    node = get_by_triangles(triangles)
+
+    if node is None:
+        return tree
+    else:
+        tree.head = node
+
+    task_queue.append((node, triangles))
+
+    while task_queue:
+        node, triangles = task_queue.pop()  # 取出当前需要计算的结果
+        out_triangles = []
+        in_triangles = []
+        for triangle in triangles:
+            out_triangles_i, in_triangles_i, on_same_i, on_diff_i = split_triangle_by_plane(triangle, node.plane)
+            out_triangles.extend(out_triangles_i)
+            in_triangles.extend(in_triangles_i)
+            node.triangles.extend(on_diff_i)
+            node.triangles.extend(on_same_i)
+        if len(out_triangles) > 0:  # 需要处理在平面外侧的数据
+            if node.out_node is None:
+                node.out_node = BSPNode(Plane(out_triangles[0].Vertices[0], out_triangles[0].Normal, error=error))
+            task_queue.append((node.out_node, out_triangles))
+
+        if len(in_triangles) > 0:
+            if node.in_node is None:
+               node.in_node = BSPNode(Plane(in_triangles[0].Vertices[0], in_triangles[0].Normal, error=error))
+            task_queue.append((node.in_node, in_triangles))
+
+    return tree
+
+cdef BSPTree create_from_triangle_mesh_2(mesh: o3d.open3d_pybind.geometry.TriangleMesh, float error=STATIC_ERROR):
     cdef BSPTree tree
     cdef BSPNode node_mid
     cdef Triangle triangle
@@ -344,9 +440,9 @@ class BooleanOperationUtils:
                                   geom2: o3d.open3d_pybind.geometry.TriangleMesh,
                                   operation: BooleanOperation,
                                   float error= STATIC_ERROR):
-        cdef np.ndarray[DTYPE_f,ndim=2] vertices
+        cdef np.ndarray[DTYPE_f, ndim=2] vertices
         cdef BSPTree geom2_tree, geom1_tree
-        cdef list triangles_all, out_triangles, in_triangles, on_same_triangles, on_diff_triangles, out_triangles2, in_triangles2, on_same_triangles2, on_diff_triangles2,triangle_in_2,new_single_triangle
+        cdef list triangles_all, out_triangles, in_triangles, on_same_triangles, on_diff_triangles, out_triangles2, in_triangles2, on_same_triangles2, on_diff_triangles2, triangle_in_2, new_single_triangle
 
         # BSP 树存储数据,广度搜索
         geom2_tree = create_from_triangle_mesh(geom2)
