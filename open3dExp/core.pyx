@@ -1,5 +1,6 @@
 # cython: language_level=3
 from enum import Enum
+import random
 import logging
 from itertools import repeat
 from datetime import datetime
@@ -99,6 +100,7 @@ cdef class BSPNode:
         self.out_node = None
         self.in_node = None
 
+# 用一个平面分割三角形，不应该出现不断分割的情况？是为何出现不断分割的情况的呢？
 cdef tuple[list] split_triangle_by_plane(Triangle triangle, Plane plane, float error = STATIC_ERROR):
     # 分割
     cdef Triangle triangle_current, triangle_append
@@ -115,6 +117,7 @@ cdef tuple[list] split_triangle_by_plane(Triangle triangle, Plane plane, float e
     cdef list on_diff = []
 
     while check_triangles:
+        logging.debug(f"check_triangles loop：{len(check_triangles)}")
         triangle_current = check_triangles.pop()
         vertices_on_triangle = np.zeros(shape=(0, 3), dtype=np.float64)  # 定义在平面上的三角形
         out_vertices_length = len(triangle_current.Vertices)
@@ -212,7 +215,7 @@ cdef class BSPTree:
     def __init__(self):
         self.head = None
 
-cdef Plane pca_plane(np.ndarray[DTYPE_f, ndim=2] points):
+cdef Plane get_plane_by_pca(np.ndarray[DTYPE_f, ndim=2] points):
     # 通过pca 求到拟合的平面,两边点的数量几乎类似,此处方法应该是正确的
     cdef Plane plane
     cdef np.ndarray[DTYPE_f, ndim=2] averages, avgs, data_adjust, featVec
@@ -234,20 +237,62 @@ cdef Plane pca_plane(np.ndarray[DTYPE_f, ndim=2] points):
     plane = Plane(average, normal)
     return plane
 
+# 通过众多三角形面片，尝试获得一个平面来分割所有的三角形
+cdef Plane get_plane_try_pca(list triangles):
+    cdef list out_triangles_i, in_triangles_i, on_same_i, on_diff_i
+    cdef Plane plane = None
+    cdef np.ndarray[DTYPE_f,ndim=2] vertices
+    cdef Triangle triangle
+    cdef int triangles_n_random_choose
+    cdef int out_n = 0
+    cdef int in_n = 0
+    cdef int on_n = 0
+
+    logging.debug(f"进入 get_plane_try_pca")
+    triangles_n_random_choose = len(triangles)//3
+    if triangles_n_random_choose<10:
+        triangles_n_random_choose = len(triangles)
+    triangles = random.sample(triangles,triangles_n_random_choose)
+    vertices = np.asarray([triangle.center() for triangle in triangles],dtype=np.float64)
+
+    logging.debug(f"结束中心点计算：{len(vertices)}")
+    if len(vertices)<3:
+        return Plane(triangles[0].center(),triangles[0].Normal)
+
+    plane = get_plane_by_pca(vertices)
+
+    logging.debug(f"结束plane初次计算，triangles :{triangles_n_random_choose}  {len(triangles)}")
+    for triangle in triangles:
+        out_triangles_i, in_triangles_i, on_same_i, on_diff_i = split_triangle_by_plane(triangle,plane)
+        logging.debug(f"out_i:{out_triangles_i},in_i:{len(in_triangles_i)},on_i:{len(on_same_i)+len(on_diff_i)}")
+        out_n+=len(out_triangles_i)
+        in_n+=len(in_triangles_i)
+        on_n+=len(on_diff_i)
+        on_n+=len(on_same_i)
+    logging.debug(f"结束循环")
+    if ((out_n+in_n+on_n)-len(triangles))/2 > len(triangles):# 不适合用pca 做平面提取
+        logging.debug(f"因为被分割的平面数占比太多，放弃pca 获取平面")
+        plane = Plane(triangles[0].center(),triangles[0].Normal)
+    logging.debug(f"end get_plane_try_pca")
+    return plane
+
 cdef BSPNode get_by_triangles(list triangles):
     # 生成Node
     cdef BSPNode node = None
     cdef Plane plane
     cdef np.ndarray[DTYPE_f, ndim=2] vertices
-    vertices = np.asarray([triangle.center() for triangle in triangles],
-                                                           dtype=np.float64)
-    if len(triangles) > 50:  # 经验数据
-        plane = pca_plane(np.asarray(vertices))
-        node = BSPNode(plane)
+    plane = get_plane_try_pca(triangles)
+    node = BSPNode(plane)
 
-    elif len(triangles) > 0:
-        plane = Plane(triangles[0].Vertices[0], triangles[0].Normal)
-        node = BSPNode(plane)
+    # vertices = np.asarray([triangle.center() for triangle in triangles],
+    #                                                        dtype=np.float64)
+    # if len(triangles) > 50:  # 经验数据
+    #     plane = get_plane_by_pca(np.asarray(vertices))
+    #     node = BSPNode(plane)
+    #
+    # elif len(triangles) > 0:
+    #     plane = Plane(triangles[0].Vertices[0], triangles[0].Normal)
+    #     node = BSPNode(plane)
     return node
 
 cdef BSPTree create_from_triangle_mesh(mesh: o3d.open3d_pybind.geometry.TriangleMesh, float error=STATIC_ERROR):
@@ -288,6 +333,7 @@ cdef BSPTree create_from_triangle_mesh(mesh: o3d.open3d_pybind.geometry.Triangle
 
     while task_queue:
         node, triangles = task_queue.pop()  # 取出当前需要计算的结果
+
         out_triangles = []
         in_triangles = []
         for triangle in triangles:
@@ -298,12 +344,14 @@ cdef BSPTree create_from_triangle_mesh(mesh: o3d.open3d_pybind.geometry.Triangle
             node.triangles.extend(on_same_i)
         if len(out_triangles) > 0:  # 需要处理在平面外侧的数据
             if node.out_node is None:
-                node.out_node = BSPNode(Plane(out_triangles[0].Vertices[0], out_triangles[0].Normal, error=error))
+                plane = get_plane_try_pca(out_triangles)
+                node.out_node = BSPNode(plane)
             task_queue.append((node.out_node, out_triangles))
-
+        logging.debug(f"本次需要判断的triangles:{len(triangles)},还剩余:{len(task_queue)},out:{len(out_triangles)},in:{len(in_triangles)}")
         if len(in_triangles) > 0:
             if node.in_node is None:
-               node.in_node = BSPNode(Plane(in_triangles[0].Vertices[0], in_triangles[0].Normal, error=error))
+                plane = get_plane_try_pca(in_triangles)
+                node.in_node = BSPNode(plane)
             task_queue.append((node.in_node, in_triangles))
 
     return tree
@@ -443,9 +491,10 @@ class BooleanOperationUtils:
         cdef np.ndarray[DTYPE_f, ndim=2] vertices
         cdef BSPTree geom2_tree, geom1_tree
         cdef list triangles_all, out_triangles, in_triangles, on_same_triangles, on_diff_triangles, out_triangles2, in_triangles2, on_same_triangles2, on_diff_triangles2, triangle_in_2, new_single_triangle
-
+        logging.debug(f"进入几何体布尔运算状态")
         # BSP 树存储数据,广度搜索
         geom2_tree = create_from_triangle_mesh(geom2)
+        logging.debug(f"结束第一个几何体bsp 树生成")
         start_time = datetime.now()
         geom1_tree = create_from_triangle_mesh(geom1)
 
