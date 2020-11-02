@@ -192,7 +192,7 @@ cdef class Plane:
             in_triangles.extend(self.get_triangles(in_vertices, triangle.Normal))
         logging.debug(f"最终的out_triangles:{len(out_triangles)}")
         logging.debug(f"in_triangles:{len(in_triangles)}")
-        logging.debug(f"on_same:{len(on_same)+len(on_diff)}")
+        logging.debug(f"on_same:{len(on_same) + len(on_diff)}")
         return out_triangles, in_triangles, on_same, on_diff
 
     # 满足右手定则的顺序点，返回三角形
@@ -311,14 +311,12 @@ cdef Plane get_plane_try_pca(list triangles):
     cdef int in_n = 0  # 平面内
     cdef int on_n = 0  # 被分割的三角形
     cdef int some_n = 0  # 共面
-    # cdef float quality # plane 的质量
-    # logging.debug(f"进入 get_plane_try_pca")
 
     if len(triangles) < 60:
         plane = Plane.create_by_triangle(triangles[0])
         return plane
 
-    triangles_n_random_choose = len(triangles) // 3
+    triangles_n_random_choose = min(len(triangles) // 3,60)
 
     if triangles_n_random_choose < 20:
         triangles_n_random_choose = len(triangles)
@@ -326,17 +324,12 @@ cdef Plane get_plane_try_pca(list triangles):
     triangles = random.sample(triangles, triangles_n_random_choose)
     vertices = np.asarray([triangle.center() for triangle in triangles], dtype=np.float64)
 
-    # logging.debug(f"结束中心点计算：{len(vertices)}")
     if len(vertices) <= 3:
-        # logging.debug(f"直接返回某个三角面")
         return Plane.create_by_origin(triangles[0].Vertices[0], triangles[0].Normal)
 
     plane = get_plane_by_pca(vertices)
-
-    # logging.debug(f"结束plane初次计算，triangles :{triangles_n_random_choose}  {len(triangles)}")
     for triangle in triangles:
         out_triangles_i, in_triangles_i, on_same_i, on_diff_i = plane.split_triangle(triangle)
-        # logging.debug(f"out_i:{len(out_triangles_i)},in_i:{len(in_triangles_i)},on_i:{len(on_same_i) + len(on_diff_i)}")
         if len(out_triangles_i) > 0 and len(in_triangles_i) > 0:  # 点在异侧,说明这个三角形被分割开了,splited
             on_n += 1
         elif len(out_triangles_i) > 0:  # 同侧,不过三角形和平面相连
@@ -345,13 +338,8 @@ cdef Plane get_plane_try_pca(list triangles):
             in_n += 1
         else:  # 都在平面上
             some_n += 1
-    # logging.debug(
-    #     f"PCA 中,共抽取了:{triangles_n_random_choose}个三角形,其中:out triangle:{out_n},in triangle:{in_n},splited:{on_n},some_n:{some_n}")
-    # quality = (out_n/triangles_n_random_choose) + (in_n/triangles_n_random_choose)
     if on_n / len(triangles) > 0.4 or out_n == 0 or in_n == 0:  # 不适合用pca 做平面提取
-        # logging.debug(f"因为被分割的平面数占比太多，放弃pca 获取平面")
         plane = Plane.create_by_origin(triangles[0].Vertices[0], triangles[0].Normal)
-    # logging.debug(f"end get_plane_try_pca")
     return plane
 
 # 根据三角形,生成默认优化后的Node
@@ -460,9 +448,11 @@ def split_triangle_mesh(mesh: o3d.open3d_pybind.geometry.TriangleMesh, BSPTree t
             vertices = np.append(vertices, [mesh.vertices[mesh_angle[i]]], axis=0)
             # vertices.append()
 
+        # 构造了三角形Triangle
         triangle_mid = Triangle(vertices, mesh.triangle_normals[angle_index])
 
         task_queue = [(triangle_mid, tree.head, 0)]
+
         while task_queue:
             triangle_use, node_use, surface_status_use = task_queue.pop()  # 此前计算的相关信息
 

@@ -14,7 +14,7 @@ from datetime import datetime
 
 logging.basicConfig(level=logging.INFO)
 
-from .core import Triangle, Plane, Line,cos_with_vectors,create_bsp_tree_with_triangle_mesh,to_triangle_mesh
+from .core import Triangle, Plane, Line,cos_with_vectors,create_bsp_tree_with_triangle_mesh,to_triangle_mesh,split_triangle_mesh
 
 
 class CoreTest(unittest.TestCase):
@@ -46,23 +46,32 @@ class CoreTest(unittest.TestCase):
         cos_value = cos_with_vectors(v1,v2)
         self.assertTrue(cos_value==0,f"cos 夹角计算失败:{v1},{v2}:{cos_value}")
 
-    def test_singl_bsp_tree(self):
-        start = datetime.now()
+    def test_single_bsp_tree(self):
 
         mesh_qiu: o3d.open3d_pybind.geometry.TriangleMesh = o3d.geometry.TriangleMesh.create_sphere(10)
         mesh_lifang: o3d.open3d_pybind.geometry.TriangleMesh = o3d.geometry.TriangleMesh.create_box(5,5,5).translate((8, 0, 0))
         mesh_qiu.compute_vertex_normals()
         mesh_lifang.compute_vertex_normals()
-
+        start = datetime.now()
         tree_qiu = create_bsp_tree_with_triangle_mesh(mesh_qiu)
-        tree_lifang = create_bsp_tree_with_triangle_mesh(mesh_lifang)
         end = datetime.now()
-        logging.info(f"bsp 树构造费时:{end-start}")
-        mesh_qiu = to_triangle_mesh(tree_qiu.traverse())
-        mesh_lifang = to_triangle_mesh(tree_lifang.traverse())
-        mesh_qiu = mesh_qiu.sample_points_uniformly(number_of_points=1500000)
-        mesh_lifang = mesh_lifang.sample_points_uniformly(number_of_points=1500000)
-        o3d.visualization.draw_geometries([mesh_qiu,mesh_lifang])
+        logging.info(f"bsp 树构造费时:{end - start}")
+        tree_lifang = create_bsp_tree_with_triangle_mesh(mesh_lifang)
+
+        start = datetime.now()
+        out_triangles, in_triangles, on_same_triangles, on_diff_triangles = split_triangle_mesh(mesh_qiu, tree_lifang)
+        end = datetime.now()
+        logging.info(f"分割切面费时:{end - start}")
+        iteral_use = (list_angle2 for list_angle1 in out_triangles for list_angle2 in list_angle1)
+        mesh_handle = to_triangle_mesh(iteral_use)
+
+        # mesh_qiu = to_triangle_mesh(tree_qiu.traverse())
+        # mesh_lifang = to_triangle_mesh(tree_lifang.traverse())
+
+        mesh_handle= mesh_handle.sample_points_uniformly(number_of_points=1500000)
+        # mesh_qiu = mesh_qiu.sample_points_uniformly(number_of_points=1500000)
+        # mesh_lifang = mesh_lifang.sample_points_uniformly(number_of_points=1500000)
+        o3d.visualization.draw_geometries([mesh_handle])
 
 
 if __name__ == '__main__':
