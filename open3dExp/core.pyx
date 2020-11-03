@@ -493,6 +493,7 @@ def split_triangle_mesh(mesh: o3d.open3d_pybind.geometry.TriangleMesh, BSPTree t
         Triangle  triangle_mid, triangle_use
         np.ndarray  vertices,mesh_angle
 
+    # 嵌套列表,减少中间过程中的重组
     out_triangles = []
     in_triangles = []
     on_same_triangles = []
