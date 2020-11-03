@@ -354,7 +354,7 @@ cdef Plane get_plane_by_pca(np.ndarray  points):
     return plane
 
 # 通过众多三角形面片，尝试获得一个平面来分割所有的三角形
-cdef Plane get_plane_try_pca(list triangles, int max_triangles=60, float prop=0.3, int min_triangles=20,float check_value=0.6):
+cdef Plane get_plane_try_pca(list triangles, int max_triangles=60, float prop=0.3, int min_triangles=20,float check_value=0.5):
     cdef:
         list out_triangles_i, in_triangles_i, on_same_i, on_diff_i
         Plane plane = None
@@ -370,12 +370,7 @@ cdef Plane get_plane_try_pca(list triangles, int max_triangles=60, float prop=0.
         float mid_n
         float quality
 
-
     triangles_n_total = len(triangles)
-    # 对于面比较少的情况,可以直接返回其中的某个面？
-    # if triangles_n_total < 60:  # 这个值是非参数化的,是经验化的?
-    #     plane = Plane.create_by_triangle(triangles[0])
-    #     return plane
 
     # 防止传入面太多
     triangles_n_random_choose = min(int(triangles_n_total * prop), max_triangles)  # 如果传入的平面非常多,目前采取的方案是随机取固定个数的三角形
@@ -410,29 +405,25 @@ cdef Plane get_plane_try_pca(list triangles, int max_triangles=60, float prop=0.
         plane = Plane.create_by_origin(triangles[0].Vertices[0], triangles[0].Normal)
     return plane
 
-# 根据三角形,生成默认优化后的Node
-cdef BSPNode get_by_triangles(list triangles):
-    cdef BSPNode node = None
-    cdef Plane plane
-    cdef np.ndarray  vertices
+# 根据三角形集,选择优化后的平面生成Node
+cdef BSPNode get_node_by_triangles(list triangles):
+    cdef:
+        BSPNode node = None
+        Plane plane
+
     plane = get_plane_try_pca(triangles)  #
     node = BSPNode(plane)
     return node
 
-# 通过triangleMesh 生成BSP 树
-def create_bsp_tree_with_triangle_mesh(mesh):
-    cdef BSPTree tree  # 返回的bsp树
-    cdef BSPNode node = None  # 节点信息
-    cdef Plane plane  # 平面
+cdef list get_triangles_with_mesh(mesh):
+    cdef:
+        np.ndarray singe_triangle,vertices
+        list triangles
+        int triangle_index
+        Triangle triangle
 
-    cdef Triangle triangle  # 单个三角形面片
-    cdef list triangles  # 存放所有的三角形面片
-    cdef list task_queue, out_triangles, in_triangles, on_same, on_diff, out_triangles_i, in_triangles_i, on_same_i, on_diff_i  # 广度优先的插入方式时的任务队列
-    cdef int triangle_index  # 第几个三角形
-
-    task_queue = []
-    tree = BSPTree()
     triangles = []  # 初始化,用于存放三角形
+
     for triangle_index in range(len(mesh.triangles)):  # 遍历三角形
         singe_triangle = mesh.triangles[triangle_index]
         # 存放三角形的点
@@ -443,13 +434,29 @@ def create_bsp_tree_with_triangle_mesh(mesh):
         triangle = Triangle(vertices, mesh.triangle_normals[triangle_index])
         triangles.append(triangle)  # 会总处理
 
+    return triangles
+
+# 通过triangleMesh 生成BSP 树
+def create_bsp_tree_with_triangle_mesh(mesh):
+    cdef:
+        BSPTree tree  # 返回的bsp树
+        BSPNode node = None  # 节点信息
+        Plane plane  # 平面
+        Triangle triangle  # 单个三角形面片
+        list triangles,task_queue, out_triangles, in_triangles, on_same, on_diff, out_triangles_i, in_triangles_i, on_same_i, on_diff_i
+
+    task_queue = []
+    tree = BSPTree()
+    triangles = get_triangles_with_mesh(mesh) # 初始化,用于存放三角形
+
     # 初始化一个节点,需要初始化一个平面
-    node = get_by_triangles(triangles)
+    node = get_node_by_triangles(triangles)
 
     if node is None:
         return tree
     else:
         tree.head = node
+
     task_queue.append((tree.head, triangles))
 
     while task_queue:
@@ -457,24 +464,16 @@ def create_bsp_tree_with_triangle_mesh(mesh):
         out_triangles = []
         in_triangles = []
         for triangle in triangles:
-
-            _, _, on_same_i, on_diff_i = node.plane.split_triangle(triangle, out_triangles, in_triangles)
-
-            if len(on_diff_i) > 0 or len(on_same_i) > 0:
-                node.triangles.extend(on_diff_i)
-                node.triangles.extend(on_same_i)
-        # 不应该出现这多个平面都在内部或者都在外部的情况？
+            node.plane.split_triangle(triangle, out_triangles, in_triangles,node.triangles,node.triangles)
 
         if len(out_triangles) > 0:  # 需要处理在平面外侧的数据
             if node.out_node is None:
-                plane = get_plane_try_pca(out_triangles)
-                node.out_node = BSPNode(plane)
+                node.out_node = get_node_by_triangles(out_triangles)
             task_queue.append((node.out_node, out_triangles))
 
         if len(in_triangles) > 0:
             if node.in_node is None:
-                plane = get_plane_try_pca(in_triangles)
-                node.in_node = BSPNode(plane)
+                node.in_node = get_node_by_triangles(in_triangles)
             task_queue.append((node.in_node, in_triangles))
 
     return tree
@@ -487,12 +486,12 @@ def split_triangle_mesh(mesh: o3d.open3d_pybind.geometry.TriangleMesh, BSPTree t
     :param tree:
     :return:
     """
-    cdef BSPNode node_use
-    cdef list task_queue, out_triangles, in_triangles, on_same_triangles, on_diff_triangles, out_mid, in_mid, on_same_mid, on_diff_mid
-    cdef int angle_index, surface_status_use
-    cdef Triangle  triangle_mid, triangle_use
-    cdef np.ndarray  vertices
-    cdef np.ndarray  mesh_angle
+    cdef:
+        BSPNode node_use
+        list task_queue, out_triangles, in_triangles, on_same_triangles, on_diff_triangles, out_mid, in_mid, on_same_mid, on_diff_mid
+        int angle_index, surface_status_use
+        Triangle  triangle_mid, triangle_use
+        np.ndarray  vertices,mesh_angle
 
     out_triangles = []
     in_triangles = []
