@@ -7,9 +7,7 @@ Python:     python3.6
 
 """
 from enum import Enum
-import random
 import logging
-import math
 from itertools import repeat
 from datetime import datetime
 

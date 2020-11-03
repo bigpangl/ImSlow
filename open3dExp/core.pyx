@@ -1,10 +1,7 @@
 # cython: language_level=3
-from enum import Enum
 import random
 import logging
-import math
 from itertools import repeat
-from datetime import datetime
 
 import open3d as o3d
 import numpy as np
@@ -106,7 +103,6 @@ cdef class Plane:
             raise Exception(f"直线和平面平行,无法计算交点cos value:{cos_btn_line_and_normal}")
 
         if abs(self.check_in(line.Origin)) <= STATIC_ERROR:  # 此时认为,小于一定误差时：点在平面上
-            # logging.warning(f"on plane in error")
             vertex_back = line.Origin
         else:
             # 通过减少中间的重复计算提高了精度,此处计算出来的点应该能确保在平面上
@@ -144,6 +140,7 @@ cdef class Plane:
             check_value = self.check_in(vertex)
             check_value = [0, check_value][abs(check_value) > STATIC_ERROR]  # 放开精度问题
             check_status.append(check_value)
+
         for index_i in range(len(triangle.Vertices)):
 
             index_i_next = (index_i + 1) % 3  # 特定除以3
@@ -165,7 +162,6 @@ cdef class Plane:
             check_tmp = check_status[index_i] * check_status[index_i_next]
 
             if check_tmp < 0:  # 不同向
-                logging.debug(f"不同向")
                 try:
                     vertex = self.intersect(Line.create_by_points(vertex, vertex_next))
                 except Exception as e:
@@ -175,12 +171,8 @@ cdef class Plane:
                 out_vertices.append(vertex)
                 on_vertices.append(vertex)
                 in_vertices.append(vertex)
-        # logging.debug(f"out_vertices:{len(out_vertices)}")
-        # logging.debug(f"on_vertices:{len(on_vertices)}")
-        # logging.debug(f"in_vertices:{len(in_vertices)}")
         if len(on_vertices) == 3:
             # 额外计算法向量是否相同
-            # logging.debug(f"on_vertices length is 3,normal:{self.Normal}")
             cos_value = cos_with_vectors(self.Normal, triangle.Normal)
             if 1 - cos_value < STATIC_ERROR:
                 on_same.append(triangle)
@@ -189,9 +181,6 @@ cdef class Plane:
         else:
             out_triangles.extend(self.get_triangles(out_vertices, triangle.Normal))
             in_triangles.extend(self.get_triangles(in_vertices, triangle.Normal))
-        # logging.debug(f"最终的out_triangles:{len(out_triangles)}")
-        # logging.debug(f"in_triangles:{len(in_triangles)}")
-        # logging.debug(f"on_same:{len(on_same) + len(on_diff)}")
         return out_triangles, in_triangles, on_same, on_diff
 
     # 满足右手定则的顺序点，返回三角形
@@ -203,6 +192,9 @@ cdef class Plane:
             int vertices_n = len(vertices)
             int i, j
             Triangle triangle
+
+        if len(vertices)<3:
+            return triangles_back
 
         for i in range(0, vertices_n - 1, 2):
             use_vertices = []
@@ -290,11 +282,9 @@ cdef class BSPTree:
 
         while node:
             check_value = node.plane.check_in(vertex)
-            logging.info(f"{node.plane},{check_value},{node.out_node}")
             if check_value > 0 and node.out_node is None:
                 return 1
             elif check_value > 0 and node.out_node is not None:
-                logging.info(f"check_value 不为0 ,但是out_node 存在")
                 node = node.out_node
                 continue
 
@@ -315,7 +305,6 @@ cdef class BSPTree:
                 elif node.out_node is not None:
                     node = node.out_node
                 else:
-                    logging.warning(f"最终直接返回0")
                     return 0
 
 cdef Plane get_plane_by_pca(np.ndarray  points):
@@ -410,7 +399,6 @@ def create_bsp_tree_with_triangle_mesh(mesh):
     task_queue = []
     tree = BSPTree()
     triangles = []  # 初始化,用于存放三角形
-    logging.debug(f"几何体点信息:{np.asarray(mesh.vertices)}")
     for triangle_index in range(len(mesh.triangles)):  # 遍历三角形
         singe_triangle = mesh.triangles[triangle_index]
         # 存放三角形的点
@@ -421,7 +409,6 @@ def create_bsp_tree_with_triangle_mesh(mesh):
         triangle = Triangle(vertices, mesh.triangle_normals[triangle_index])
         triangles.append(triangle)  # 会总处理
 
-    logging.debug(f"三角形提取完毕,总共{len(triangles)} 个三角形")
 
     # 初始化一个节点,需要初始化一个平面
     node = get_by_triangles(triangles)
@@ -434,39 +421,27 @@ def create_bsp_tree_with_triangle_mesh(mesh):
 
     while task_queue:
         node, triangles = task_queue.pop()  # 取出当前需要计算的结果
-        logging.debug(f"node 所在平面 origin:{node.plane.Origin},normal:{node.plane.Normal}")
         out_triangles = []
         in_triangles = []
-        count = 0
         for triangle in triangles:
-            out_triangles_i, in_triangles_i, on_same_i, on_diff_i = node.plane.split_triangle(triangle, out_triangles,
-                                                                                              in_triangles)
-            # logging.debug(f"single loop:out:{len(out_triangles_i)},in:{len(in_triangles_i)},on:{len(on_same_i)+len(on_diff_i)}")
+
+            _, _, on_same_i, on_diff_i = node.plane.split_triangle(triangle, out_triangles,in_triangles)
 
             if len(on_diff_i) > 0 or len(on_same_i) > 0:
-                # logging.debug(f"存在共面三角形")
                 node.triangles.extend(on_diff_i)
                 node.triangles.extend(on_same_i)
-
-            count += 1
-            logging.debug(f"遍历:{count}次")
         # 不应该出现这多个平面都在内部或者都在外部的情况？
-
-        logging.debug(
-            f"本次需要判断的triangles:{len(triangles)},还剩余:{len(task_queue)},out:{len(out_triangles)},in:{len(in_triangles)}")
 
         if len(out_triangles) > 0:  # 需要处理在平面外侧的数据
             if node.out_node is None:
                 plane = get_plane_try_pca(out_triangles)
                 node.out_node = BSPNode(plane)
-                # logging.debug(f"node 不存在")
             task_queue.append((node.out_node, out_triangles))
 
         if len(in_triangles) > 0:
             if node.in_node is None:
                 plane = get_plane_try_pca(in_triangles)
                 node.in_node = BSPNode(plane)
-                # logging.debug(f"node 不存在")
             task_queue.append((node.in_node, in_triangles))
 
     return tree
