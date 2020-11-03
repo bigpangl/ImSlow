@@ -14,7 +14,8 @@ from datetime import datetime
 import open3d as o3d
 import numpy as np
 
-from .core import Triangle,create_bsp_tree_with_triangle_mesh,split_triangle_mesh,to_triangle_mesh
+from .core import Triangle, create_bsp_tree_with_triangle_mesh, split_triangle_mesh, to_triangle_mesh
+
 
 class BooleanOperation(Enum):
     Union = 1  # 合并
@@ -78,4 +79,3 @@ class BooleanOperationUtils:
         iteral_use = (angle for list_angle1 in triangles_all for list_angle2 in list_angle1 for angle in list_angle2)
         mesh = to_triangle_mesh(iteral_use)
         return mesh
-

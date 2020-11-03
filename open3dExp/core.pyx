@@ -354,7 +354,7 @@ cdef Plane get_plane_by_pca(np.ndarray  points):
     return plane
 
 # 通过众多三角形面片，尝试获得一个平面来分割所有的三角形
-cdef Plane get_plane_try_pca(list triangles, int max_triangles=60, float prop=0.3, int min_triangles=20,float check_value=0.5):
+cdef Plane get_plane_try_pca(list triangles, int max_triangles=90, float prop=0.4, int min_triangles=30,float check_value=0.5):
     cdef:
         list out_triangles_i, in_triangles_i, on_same_i, on_diff_i
         Plane plane = None
