@@ -354,14 +354,13 @@ cdef Plane get_plane_by_pca(np.ndarray  points):
     return plane
 
 # 通过众多三角形面片，尝试获得一个平面来分割所有的三角形
-cdef Plane get_plane_try_pca(list triangles, int max_triangles=90, float prop=0.4, int min_triangles=30,float check_value=0.5):
+cdef Plane get_plane_try_pca(list triangles, int max_triangles=5,float check_value=0.5):
     cdef:
         list out_triangles_i, in_triangles_i, on_same_i, on_diff_i
         Plane plane = None
         np.ndarray  vertices
         Triangle triangle
         int triangles_n_total
-        int triangles_n_random_choose
 
         int out_n = 0  # 平面外
         int in_n = 0  # 平面内
@@ -371,19 +370,11 @@ cdef Plane get_plane_try_pca(list triangles, int max_triangles=90, float prop=0.
         float quality
 
     triangles_n_total = len(triangles)
-
-    # 防止传入面太多
-    triangles_n_random_choose = min(int(triangles_n_total * prop), max_triangles)  # 如果传入的平面非常多,目前采取的方案是随机取固定个数的三角形
-
-    # 防止传入面太少
-    if triangles_n_random_choose < min_triangles:
-        triangles_n_random_choose = min(triangles_n_total, max_triangles)  # 如果选择PCA ,那么在尽量的选择最小值和最大值之间的个数
-
-    triangles = random.sample(triangles, triangles_n_random_choose)
-    vertices = np.asarray([triangle.center() for triangle in triangles], dtype=np.float64)
-
-    if len(vertices) <= 3:
+    if triangles_n_total<max_triangles:
         return Plane.create_by_origin(triangles[0].Vertices[0], triangles[0].Normal)
+
+    triangles = random.sample(triangles, max_triangles)
+    vertices = np.asarray([triangle.center() for triangle in triangles], dtype=np.float64)
 
     plane = get_plane_by_pca(vertices)
     for triangle in triangles:
@@ -399,7 +390,7 @@ cdef Plane get_plane_try_pca(list triangles, int max_triangles=90, float prop=0.
     mid_n = (out_n + in_n) / 2
 
     # 这个值越大,说明两侧越均匀,中间被分割的三角形越少,
-    quality = 1 - (on_n / triangles_n_random_choose) - (out_n - mid_n) ** 2 - (in_n - mid_n) ** 2
+    quality = 1 - (on_n / max_triangles) - (out_n - mid_n) ** 2 - (in_n - mid_n) ** 2
 
     if quality < check_value:  # 说明此时选取的平面集,不适合用pca 做平面分割
         plane = Plane.create_by_origin(triangles[0].Vertices[0], triangles[0].Normal)
