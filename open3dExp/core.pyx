@@ -1,4 +1,13 @@
 # cython: language_level=3
+"""
+
+扩展库的核心部分,试图通过cython 进行速度上的提升
+
+部分位置无法完全采用cython 语法:numpy 内部float 和 double 的自动转换
+
+author:LanHao
+
+"""
 import random
 import logging
 from itertools import repeat
@@ -12,7 +21,7 @@ np.import_array()
 ctypedef np.int_t DTYPE_t
 ctypedef np.float_t DTYPE_f
 
-cpdef public float STATIC_ERROR = 1e-10
+cpdef public float STATIC_ERROR = 1e-10  # 精度问题始终存在,所以这里进行了一个取舍
 
 # 计算两个向量的夹角cos值
 cpdef float cos_with_vectors(np.ndarray  vector1, np.ndarray  vector2):
@@ -35,7 +44,7 @@ cdef class Triangle:  # 数据存储以np.ndarray
         return f"Vertices:{self.Vertices},Normal:{self.Normal}"
 
     def __repr__(self):
-        return self.__str__()
+        return f"Triangle:{self.__str__()}"
 
 cdef class Line:
     """
@@ -44,44 +53,38 @@ cdef class Line:
     cdef public np.ndarray Origin
     cdef public np.ndarray Vector
 
-    @staticmethod  # 通过线条上两个点确定一条直线
-    cdef public Line create_by_points(np.ndarray start, np.ndarray  end):
-        cdef Line line = Line()
-        line.Origin = start
-        line.Vector = end - start
-        return line
+    def __init__(self, np.ndarray origin, np.ndarray vector):
+        self.Origin = origin
+        self.Vector = vector
 
-    @staticmethod  # 通过经过点,线条方向向量确定直线
-    cdef public Line create_by_origin(np.ndarray  origin, np.ndarray  vector):
-        cdef Line line = Line()
-        line.Origin = origin
-        line.Vector = vector
-        return line
+    @classmethod  # 通过线条上两个点确定一条直线
+    def create_by_points(cls, np.ndarray start, np.ndarray  end):
+        return cls(start, end - start)
+
+    @classmethod  # 通过经过点,线条方向向量确定直线
+    def create_by_origin(cls, np.ndarray  origin, np.ndarray  vector):
+        return cls(origin, vector)
 
 cdef class Plane:
     # 点法式 定义平面
     cdef public  np.ndarray Normal
     cdef public  np.ndarray Origin
 
-    @staticmethod
-    def create_by_origin(np.ndarray origin, np.ndarray normal):
-        cdef Plane plane = Plane()
-        plane.Origin = origin
-        plane.Normal = normal
-        return plane
+    def __init__(self, np.ndarray normal, np.ndarray origin):
+        self.Normal = normal
+        self.Origin = origin
 
-    @staticmethod
-    cdef public Plane create_by_triangle(Triangle triangle):
-        cdef Plane plane = Plane()
-        plane.Origin = triangle.Vertices[0]
-        plane.Normal = triangle.Normal
-        return plane
+    @classmethod
+    def create_by_origin(cls, np.ndarray origin, np.ndarray normal):
+        return cls(normal, origin)
+
+    @classmethod
+    def create_by_triangle(cls, Triangle triangle):
+        return cls(triangle.Normal, triangle.Vertices[0])
 
     # 判断一个点与平面的相对位置
     cpdef float check_in(self, np.ndarray  vertex):
-        # 这里会根据误差,进行判断
         cdef float value = np.matmul(self.Normal, (vertex - self.Origin).T)
-
         return value
 
     # 计算一个点到平面的投影点
@@ -113,11 +116,9 @@ cdef class Plane:
         return vertex_back
 
     # 平面分割三角形
-    cpdef tuple[list] split_triangle(self, Triangle triangle, list out_triangles=None, list in_triangles=None):
-        # TODO 这个函数检测失败
+    cpdef tuple[list] split_triangle(self, Triangle triangle, list out_triangles=None, list in_triangles=None,
+                                     list on_same=None, list on_diff=None):
         cdef:
-            list on_same = []
-            list on_diff = []
             list out_vertices = []
             list on_vertices = []
             list in_vertices = []
@@ -126,19 +127,25 @@ cdef class Plane:
             np.ndarray  vertex, vertex_next
 
             int index_i, index_i_next
+
             float check_tmp, cos_value
 
+        # 提供基于已有的列表做后续添加,处理一些特定的情况中,列表拼接额外费时<;利用python 列表的引用传递
 
         if out_triangles is None:
             out_triangles = []
         if in_triangles is None:
             in_triangles = []
+        if on_same is None:
+            on_same = []
+        if on_diff is None:
+            on_diff = []
 
         # 缓存所有点和平面的位置关系
         for index_i in range(len(triangle.Vertices)):
             vertex = triangle.Vertices[index_i]
             check_value = self.check_in(vertex)
-            check_value = [0, check_value][abs(check_value) > STATIC_ERROR]  # 放开精度问题
+            check_value = [0, check_value][abs(check_value) > STATIC_ERROR]  # 处理精度取舍
             check_status.append(check_value)
 
         for index_i in range(len(triangle.Vertices)):
@@ -179,21 +186,24 @@ cdef class Plane:
             else:
                 on_diff.append(triangle)
         else:
-            out_triangles.extend(self.get_triangles(out_vertices, triangle.Normal))
-            in_triangles.extend(self.get_triangles(in_vertices, triangle.Normal))
+            self.get_triangles(out_vertices, triangle.Normal, out_triangles)
+            self.get_triangles(in_vertices, triangle.Normal, in_triangles)
         return out_triangles, in_triangles, on_same, on_diff
 
     # 满足右手定则的顺序点，返回三角形
-    cdef list get_triangles(self, list vertices, np.ndarray  normal):
+    cdef list get_triangles(self, list vertices, np.ndarray  normal, list triangles_back=None):
         cdef:
-            list triangles_back = []
             list use_vertices
             np.ndarray  vertex_j
             int vertices_n = len(vertices)
             int i, j
             Triangle triangle
+        if triangles_back is None:
+            triangles_back = []
 
-        if len(vertices)<3:
+        assert vertices_n < 5, Exception("三角形在分割时,被分割出来的部分,不可能存在超过5个点")
+
+        if vertices_n < 3:
             return triangles_back
 
         for i in range(0, vertices_n - 1, 2):
@@ -225,20 +235,32 @@ cdef class BSPNode:
         self.in_node = None
 
 def to_triangle_mesh(iteral):
-    cdef Triangle angle
-    cdef int index
-    cdef np.ndarray triangle_index_np
-    cdef np.ndarray select
+    """
+    将任何可迭代对象(迭代出来的为一个Triangle)转换为open3d 中的TriangleMesh 对象,期间会进行重复点的剔除工作
+
+    这个过程,从目前的效果来看,本身耗时并不多
+
+    :param iteral:
+    :return:
+    """
+    cdef:
+        list triangle_index
+        Triangle triangle
+        int index
+        np.ndarray triangle_index_np
+        np.ndarray select
+
+
     mesh = o3d.geometry.TriangleMesh()
 
-    for angle in iteral:
+    for triangle in iteral:
         triangle_index = []
         for i in range(3):
-            select = np.where((mesh.vertices == angle.Vertices[i]).all(1))[0]
+            select = np.where((mesh.vertices == triangle.Vertices[i]).all(1))[0]
             if len(select) > 0:
                 index = select[0]
             else:
-                mesh.vertices.append(angle.Vertices[i])
+                mesh.vertices.append(triangle.Vertices[i])
                 index = len(mesh.vertices) - 1
 
             triangle_index.append(index)
@@ -246,7 +268,7 @@ def to_triangle_mesh(iteral):
         triangle_index_np = np.asarray(triangle_index, dtype=np.int32)
 
         mesh.triangles.append(triangle_index_np)
-        mesh.triangle_normals.append(angle.Normal)
+        mesh.triangle_normals.append(triangle.Normal)
     return mesh
 
 cdef class BSPTree:
@@ -255,12 +277,13 @@ cdef class BSPTree:
     def __init__(self):
         self.head = None
 
-    def traverse(self):  #
+    def traverse(self):
         """
-        广度优先
+        因为采取的是列表,从返回的数据上，应该不能归属于广度or深度。而是简单的归属于先序遍历问题
         :return:
         """
         task_queue = [self.head]
+
         while task_queue:
             node = task_queue.pop()
             for triangle in node.triangles:
@@ -274,7 +297,7 @@ cdef class BSPTree:
         """
         判断一个点在几何体内部还是外部还是表面
         :param vertex:
-        :return:
+        :return: -1 内部,0 表面,1 外部
         """
 
         node = self.head
@@ -308,12 +331,11 @@ cdef class BSPTree:
                     return 0
 
 cdef Plane get_plane_by_pca(np.ndarray  points):
-    # 通过pca 求到拟合的平面,两边点的数量几乎类似,此处方法应该是正确的
-    cdef Plane plane
-    cdef np.ndarray averages, avgs, data_adjust, featVec, cov_x
-    cdef np.ndarray  featValue, v1, v2, normal
-    cdef np.ndarray[long long, ndim=1] index
-    cdef int m, n
+    # 通过pca 求到拟合的平面,两边点的数量几乎类似
+    cdef:
+        Plane plane
+        np.ndarray average, avgs, data_adjust, feat_vec, cov_x, feat_value, normal, index
+        int m, n
 
     average = np.mean(points, axis=0)  # 中心点
     m, n = np.shape(points)  # N x 3
@@ -321,39 +343,46 @@ cdef Plane get_plane_by_pca(np.ndarray  points):
     data_adjust = points - avgs
     cov_x = np.cov(data_adjust.T)  # 计算协方差矩阵
     try:
-        featValue, featVec = np.linalg.eig(cov_x)  # 求解协方差矩阵的特征值和特征向量
-        index = np.argsort(-featValue)  # 依照featValue进行从大到小排序
-        v1 = featVec[index[0]]
-        v2 = featVec[index[1]]
-        normal = np.cross(v1, v2)  # 中途发生了错误,关于精度的？
+        feat_value, feat_vec = np.linalg.eig(cov_x)  # 求解协方差矩阵的特征值和特征向量
+        index = np.argsort(-feat_value)  # 依照featValue进行从大到小排序
+        normal = np.cross(feat_vec[index[0]], feat_vec[index[1]])  # 中途发生了错误,关于精度的？
         plane = Plane.create_by_origin(average, normal)
     except Exception as e:
         logging.error(e)
         logging.error(cov_x)
-        raise Exception("发生错误了？？")
+        raise Exception("PCA 拟合平面时发生错误")
     return plane
 
 # 通过众多三角形面片，尝试获得一个平面来分割所有的三角形
-cdef Plane get_plane_try_pca(list triangles):
-    cdef list out_triangles_i, in_triangles_i, on_same_i, on_diff_i
-    cdef Plane plane = None
-    cdef np.ndarray  vertices
-    cdef Triangle triangle
-    cdef int triangles_n_random_choose
+cdef Plane get_plane_try_pca(list triangles, int max_triangles=60, float prop=0.3, int min_triangles=20,float check_value=0.6):
+    cdef:
+        list out_triangles_i, in_triangles_i, on_same_i, on_diff_i
+        Plane plane = None
+        np.ndarray  vertices
+        Triangle triangle
+        int triangles_n_total
+        int triangles_n_random_choose
 
-    cdef int out_n = 0  # 平面外
-    cdef int in_n = 0  # 平面内
-    cdef int on_n = 0  # 被分割的三角形
-    cdef int some_n = 0  # 共面
+        int out_n = 0  # 平面外
+        int in_n = 0  # 平面内
+        int on_n = 0  # 被分割的三角形
+        int some_n = 0  # 共面
+        float mid_n
+        float quality
 
-    if len(triangles) < 60:
-        plane = Plane.create_by_triangle(triangles[0])
-        return plane
 
-    triangles_n_random_choose = min(len(triangles) // 3, 60)
+    triangles_n_total = len(triangles)
+    # 对于面比较少的情况,可以直接返回其中的某个面？
+    # if triangles_n_total < 60:  # 这个值是非参数化的,是经验化的?
+    #     plane = Plane.create_by_triangle(triangles[0])
+    #     return plane
 
-    if triangles_n_random_choose < 20:
-        triangles_n_random_choose = len(triangles)
+    # 防止传入面太多
+    triangles_n_random_choose = min(int(triangles_n_total * prop), max_triangles)  # 如果传入的平面非常多,目前采取的方案是随机取固定个数的三角形
+
+    # 防止传入面太少
+    if triangles_n_random_choose < min_triangles:
+        triangles_n_random_choose = min(triangles_n_total, max_triangles)  # 如果选择PCA ,那么在尽量的选择最小值和最大值之间的个数
 
     triangles = random.sample(triangles, triangles_n_random_choose)
     vertices = np.asarray([triangle.center() for triangle in triangles], dtype=np.float64)
@@ -372,7 +401,12 @@ cdef Plane get_plane_try_pca(list triangles):
             in_n += 1
         else:  # 都在平面上
             some_n += 1
-    if on_n / len(triangles) > 0.4 or out_n == 0 or in_n == 0:  # 不适合用pca 做平面提取
+    mid_n = (out_n + in_n) / 2
+
+    # 这个值越大,说明两侧越均匀,中间被分割的三角形越少,
+    quality = 1 - (on_n / triangles_n_random_choose) - (out_n - mid_n) ** 2 - (in_n - mid_n) ** 2
+
+    if quality < check_value:  # 说明此时选取的平面集,不适合用pca 做平面分割
         plane = Plane.create_by_origin(triangles[0].Vertices[0], triangles[0].Normal)
     return plane
 
@@ -409,7 +443,6 @@ def create_bsp_tree_with_triangle_mesh(mesh):
         triangle = Triangle(vertices, mesh.triangle_normals[triangle_index])
         triangles.append(triangle)  # 会总处理
 
-
     # 初始化一个节点,需要初始化一个平面
     node = get_by_triangles(triangles)
 
@@ -425,7 +458,7 @@ def create_bsp_tree_with_triangle_mesh(mesh):
         in_triangles = []
         for triangle in triangles:
 
-            _, _, on_same_i, on_diff_i = node.plane.split_triangle(triangle, out_triangles,in_triangles)
+            _, _, on_same_i, on_diff_i = node.plane.split_triangle(triangle, out_triangles, in_triangles)
 
             if len(on_diff_i) > 0 or len(on_same_i) > 0:
                 node.triangles.extend(on_diff_i)
