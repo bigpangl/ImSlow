@@ -8,7 +8,7 @@ from datetime import datetime
 import numpy as np
 import open3d as o3d
 
-from open3dExp.core import BooleanOperation,BooleanOperationUtils
+from open3dExp.utils import BooleanOperation,BooleanOperationUtils
 # from open3dExp.boolean import BooleanOperationUtils,BooleanOperation
 
 logging.basicConfig(level=logging.DEBUG,format="%(asctime)s:%(message)s ")

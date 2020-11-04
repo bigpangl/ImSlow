@@ -61,7 +61,6 @@ class BooleanOperationUtils:
             triangles_all.append(out_triangles)
 
             triangle_in_2 = []
-
             for single_triangle in in_triangles2:
                 new_single_triangle = []
                 for single in single_triangle:
@@ -72,9 +71,12 @@ class BooleanOperationUtils:
                     ], dtype=np.float64)
                     new_single_triangle.append(Triangle(vertices, single.Normal * -1))
                 triangle_in_2.append(new_single_triangle)
-
+            #
             triangles_all.append(triangle_in_2)
             triangles_all.append(on_diff_triangles)
+            # 待删除
+            # triangles_all.append(in_triangles)
+            # triangles_all.append(on_same_triangles)
 
         iteral_use = (angle for list_angle1 in triangles_all for list_angle2 in list_angle1 for angle in list_angle2)
         mesh = to_triangle_mesh(iteral_use)

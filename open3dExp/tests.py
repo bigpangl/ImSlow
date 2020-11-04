@@ -126,7 +126,7 @@ class CoreTest(unittest.TestCase):
             (np.asarray([4, 4, 4]), -1),
         ]
         for point, status in test_data:
-            status_check = tree_lifang.check_in(point)
+            status_check = tree_lifang.distance(point)
             self.assertEqual(status, status_check, f"校验结果异常:{status} >< {status_check}")
 
 
