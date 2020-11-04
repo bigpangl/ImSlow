@@ -14,7 +14,7 @@ from datetime import datetime
 import open3d as o3d
 import numpy as np
 
-from .core import Triangle, create_bsp_tree_with_triangle_mesh, split_triangle_mesh, to_triangle_mesh
+from .core import Triangle, BSPTree, to_triangle_mesh
 
 
 class BooleanOperation(Enum):
@@ -36,16 +36,15 @@ class BooleanOperationUtils:
                                   operation: BooleanOperation,
                                   ):
         # BSP 树存储数据,广度搜索
-        geom2_tree = create_bsp_tree_with_triangle_mesh(geom2)
-        start_time = datetime.now()
-        geom1_tree = create_bsp_tree_with_triangle_mesh(geom1)
+        geom2_tree = BSPTree.create_with_triangle_mesh(geom2) # 柱
+        geom1_tree = BSPTree.create_with_triangle_mesh(geom1) # 立方体
 
-        end_time = datetime.now()
         triangles_all = []  # 存放所有的三角面片,多层嵌套列表Triangle
 
-        out_triangles, in_triangles, on_same_triangles, on_diff_triangles = split_triangle_mesh(geom1, geom2_tree)
-        out_triangles2, in_triangles2, on_same_triangles2, on_diff_triangles2 = split_triangle_mesh(geom2, geom1_tree)
-
+        out_triangles, in_triangles, on_same_triangles, on_diff_triangles = geom2_tree.split_triangle_mesh(geom1)
+        logging.debug(f"结束圆柱分割立方体")
+        out_triangles2, in_triangles2, on_same_triangles2, on_diff_triangles2 = geom1_tree.split_triangle_mesh(geom2)
+        logging.debug(f"结束立方体分割圆柱")
         if operation == BooleanOperation.Union:  # 并集
             triangles_all.append(out_triangles)
             triangles_all.append(out_triangles2)
@@ -71,12 +70,23 @@ class BooleanOperationUtils:
                     ], dtype=np.float64)
                     new_single_triangle.append(Triangle(vertices, single.Normal * -1))
                 triangle_in_2.append(new_single_triangle)
-            #
             triangles_all.append(triangle_in_2)
             triangles_all.append(on_diff_triangles)
+            if len(on_same_triangles)>0:
+                logging.debug(f"out:{len(out_triangles)},in:{len(in_triangles)},"
+                              f"on_same:{len(on_same_triangles)},on_diff:{len(on_diff_triangles)}")
+                task_node = [geom2_tree.head]
+                while task_node:
+                    node = task_node.pop()
+                    if node.plane.Normal[2] == -1:
+                        logging.debug(f"node plane:{node.plane},triangles:{len(node.triangles)},out:{node.out_node},in:{node.in_node}")
+                    if node.out_node:
+                        task_node.append(node.out_node)
+                    if node.in_node:
+                        task_node.append(node.in_node)
             # 待删除
-            # triangles_all.append(in_triangles)
-            # triangles_all.append(on_same_triangles)
+            # assert len(on_same_triangles)==0,Exception("")
+            # triangles_all.append(on_diff_triangles)
 
         iteral_use = (angle for list_angle1 in triangles_all for list_angle2 in list_angle1 for angle in list_angle2)
         mesh = to_triangle_mesh(iteral_use)

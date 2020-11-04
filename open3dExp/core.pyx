@@ -55,7 +55,7 @@ cdef class Line:
 
     def __init__(self, np.ndarray origin, np.ndarray vector):
         self.Origin = origin
-        self.Vector = vector
+        self.Vector = vector/np.linalg.norm(vector) # 单位向量
 
     @classmethod  # 通过线条上两个点确定一条直线
     def create_by_points(cls, np.ndarray start, np.ndarray  end):
@@ -105,7 +105,7 @@ cdef class Plane:
         cdef float cos_btn_line_and_normal = cos_with_vectors(line.Vector, self.Normal)
         cdef np.ndarray  vertex_back, v_project
 
-        if abs(cos_btn_line_and_normal) == 0:  # 垂直
+        if cos_btn_line_and_normal == 0:  # 垂直
             raise Exception(f"直线和平面平行,无法计算交点cos value:{cos_btn_line_and_normal}")
 
         if self.distance(line.Origin) == 0:  # 此时认为,小于一定误差时：点在平面上
@@ -121,6 +121,7 @@ cdef class Plane:
     # 平面分割三角形
     cpdef tuple[list] split_triangle(self, Triangle triangle, list out_triangles=None, list in_triangles=None,
                                      list on_same=None, list on_diff=None):
+
         cdef:
             list out_vertices = []
             list on_vertices = []
@@ -132,7 +133,6 @@ cdef class Plane:
             int index_i, index_i_next
 
             float check_tmp, cos_value
-
         # 提供基于已有的列表做后续添加,处理一些特定的情况中,列表拼接额外费时<;利用python 列表的引用传递
 
         if out_triangles is None:
@@ -173,7 +173,7 @@ cdef class Plane:
 
             if check_tmp < 0:  # 不同向
                 try:
-                    vertex = self.intersect(Line.create_by_points(vertex, vertex_next))
+                    vertex = self.intersect(Line.create_by_points(vertex, vertex_next)) # TODO 预估,计算线于直线的交点计算错误
                 except Exception as e:
                     logging.error(f"{e}")
                     logging.error(check_status)
@@ -189,6 +189,7 @@ cdef class Plane:
             else:
                 on_diff.append(triangle)
         else:
+            # TODO 分割后的三角形为何不能使用原本三角形的法向量？并且差异较大
             self.get_triangles(out_vertices, triangle.Normal, out_triangles)
             self.get_triangles(in_vertices, triangle.Normal, in_triangles)
         return out_triangles, in_triangles, on_same, on_diff
@@ -215,6 +216,7 @@ cdef class Plane:
                 vertex_j = vertices[(i + j) % vertices_n]
                 use_vertices.append(vertex_j)
             triangle = Triangle(np.asarray(use_vertices, dtype=np.float64), normal)
+            # logging.debug(f"重新定义三角形时:{triangle}")
             triangles_back.append(triangle)
         return triangles_back
 
@@ -274,6 +276,20 @@ def to_triangle_mesh(iteral):
         mesh.triangle_normals.append(triangle.Normal)
     return mesh
 
+cdef class SplitTask:
+    """
+    被定义用来表示一个任务
+    """
+
+    cdef public Triangle triangle
+    cdef public BSPNode node
+    cdef public int status
+
+    def __init__(self, Triangle triangle, BSPNode node, int status):
+        self.triangle = triangle
+        self.node = node
+        self.status = status
+
 cdef class BSPTree:
     cdef public BSPNode head
 
@@ -332,6 +348,137 @@ cdef class BSPTree:
                     node = node.out_node
                 else:
                     return 0
+
+    # 以一个BSP 树分割一个三角形面片,分割的方式出现错误
+    cpdef tuple[list] split_triangle(self, Triangle triangle, list out_triangles=None, list in_triangles=None,
+                                     list on_same=None, list on_diff=None):
+        cdef:
+            list task_queue = [SplitTask(triangle, self.head, 0)]
+        if out_triangles is None:
+            out_triangles = []
+        if in_triangles is None:
+            in_triangles = []
+        if on_same is None:
+            on_same = []
+        if on_diff is None:
+            on_diff = []
+
+        while task_queue:  # 每一个三角形,都需要从tree 的顶部开始计算,分割出需要处理的各个子三角形
+            # surface_status_use 0 表示没有处理,
+            task_use = task_queue.pop()  # 此前计算的相关信息
+            # logging.debug(f"node plane:{task_use.node.plane}")
+            out_mid, in_mid, on_same_mid, on_diff_mid = task_use.node.plane.split_triangle(task_use.triangle)
+
+            if task_use.node.out_node is None:
+                if out_mid:
+                    out_triangles.append(out_mid)  # 通过plane 切割,确定在几何体外部
+            else:
+                # 可能在内部,也可能在内部,要继续讨论
+                add_task_queue(task_queue, task_use.node.out_node, task_use.status, out_mid)
+                # 后添加
+                add_task_queue(task_queue, task_use.node.out_node, 1, on_same_mid)
+                add_task_queue(task_queue, task_use.node.out_node, 2, on_diff_mid)
+
+
+            if task_use.node.in_node is None:
+                if len(in_mid)>0:
+                    # 剔除曾经在表面然后现在又在内部的三角面
+                    if task_use.status == 0:  # 没有出现过,在几何体表现的情况
+                        in_triangles.append(in_mid)
+                    elif task_use.status == 1:  # 同向
+                        on_same.append(in_mid)
+                    else:  # 异向
+                        on_diff.append(in_mid)
+                 # len(on_same_mid) > 0 and on_same.append(on_same_mid)
+                # len(on_diff_mid) > 0 and on_diff.append(on_diff_mid)
+            else:  # 继续处理
+                # 仍然在内部的三角面
+                add_task_queue(task_queue, task_use.node.in_node, task_use.status, in_mid)
+                # 记录
+                add_task_queue(task_queue, task_use.node.in_node, 1, on_same_mid)
+                add_task_queue(task_queue, task_use.node.in_node, 2, on_diff_mid)
+
+
+            if len(on_same_mid)>0:
+                if task_use.node.out_node is None and task_use.node.in_node is None: # 已经无法继续进行了
+                    on_same.append(on_same_mid)
+            # # 现在不再是on_same_mid 就可以在平面内外部
+            # len(on_same_mid) > 0 and on_same.append(on_same_mid)
+            # len(on_diff_mid) > 0 and on_diff.append(on_diff_mid)
+
+        return out_triangles, in_triangles, on_same, on_diff
+
+    # 通过triangleMesh 生成BSP 树
+    @classmethod
+    def create_with_triangle_mesh(cls,mesh):
+
+        cdef:
+            BSPTree tree  # 返回的bsp树
+            BSPNode node = None  # 节点信息
+            Plane plane  # 平面
+            Triangle triangle  # 单个三角形面片
+            list triangles, task_queue, out_triangles, in_triangles, on_same, on_diff, out_triangles_i, in_triangles_i, on_same_i, on_diff_i
+
+        task_queue = []
+        tree = cls()
+        triangles = get_triangles_with_mesh(mesh)  # 初始化,用于存放三角形
+
+        # 初始化一个节点,需要初始化一个平面
+        node = get_node_by_triangles(triangles)
+
+        if node is None:
+            return tree
+        else:
+            tree.head = node
+
+        task_queue.append((tree.head, triangles))
+
+        while task_queue:
+            node, triangles = task_queue.pop()  # 取出当前需要计算的结果
+            out_triangles = []
+            in_triangles = []
+            for triangle in triangles:
+                node.plane.split_triangle(triangle, out_triangles, in_triangles, node.triangles, node.triangles)
+
+            if len(out_triangles) > 0:  # 需要处理在平面外侧的数据
+                if node.out_node is None:
+                    node.out_node = get_node_by_triangles(out_triangles)
+                task_queue.append((node.out_node, out_triangles))
+
+            if len(in_triangles) > 0:
+                if node.in_node is None:
+                    node.in_node = get_node_by_triangles(in_triangles)
+                task_queue.append((node.in_node, in_triangles))
+
+        return tree
+
+    cpdef split_triangle_mesh(self,mesh: o3d.open3d_pybind.geometry.TriangleMesh):
+        cdef:
+            list task_queue, out_triangles, in_triangles, on_same_triangles, on_diff_triangles
+            int angle_index
+            Triangle  triangle_mid
+            np.ndarray  vertices, mesh_angle
+
+            SplitTask task_use
+
+        # 嵌套列表,减少中间过程中的重组
+        out_triangles = []
+        in_triangles = []
+        on_same_triangles = []
+        on_diff_triangles = []
+
+        for angle_index, mesh_angle in enumerate(mesh.triangles):
+
+            vertices = np.zeros(shape=(0, 3), dtype=np.float64)
+            for i in range(3):
+                vertices = np.append(vertices, [mesh.vertices[mesh_angle[i]]], axis=0)
+
+            # 构造了三角形Triangle
+
+            triangle_mid = Triangle(vertices, mesh.triangle_normals[angle_index])
+            self.split_triangle(triangle_mid, out_triangles, in_triangles, on_same_triangles, on_diff_triangles)
+
+        return out_triangles, in_triangles, on_same_triangles, on_diff_triangles
 
 cdef Plane get_plane_by_pca(np.ndarray  points):
     # 通过pca 求到拟合的平面,两边点的数量几乎类似
@@ -424,140 +571,17 @@ cdef list get_triangles_with_mesh(mesh):
         vertices = np.zeros(shape=(0, 3), dtype=np.float64)
         for i in range(3):
             vertices = np.append(vertices, [mesh.vertices[singe_triangle[i]]], axis=0)
-
         triangle = Triangle(vertices, mesh.triangle_normals[triangle_index])
         triangles.append(triangle)  # 会总处理
 
     return triangles
 
-# 通过triangleMesh 生成BSP 树
-def create_bsp_tree_with_triangle_mesh(mesh):
-    cdef:
-        BSPTree tree  # 返回的bsp树
-        BSPNode node = None  # 节点信息
-        Plane plane  # 平面
-        Triangle triangle  # 单个三角形面片
-        list triangles, task_queue, out_triangles, in_triangles, on_same, on_diff, out_triangles_i, in_triangles_i, on_same_i, on_diff_i
 
-    task_queue = []
-    tree = BSPTree()
-    triangles = get_triangles_with_mesh(mesh)  # 初始化,用于存放三角形
-
-    # 初始化一个节点,需要初始化一个平面
-    node = get_node_by_triangles(triangles)
-
-    if node is None:
-        return tree
-    else:
-        tree.head = node
-
-    task_queue.append((tree.head, triangles))
-
-    while task_queue:
-        node, triangles = task_queue.pop()  # 取出当前需要计算的结果
-        out_triangles = []
-        in_triangles = []
-        for triangle in triangles:
-            node.plane.split_triangle(triangle, out_triangles, in_triangles, node.triangles, node.triangles)
-
-        if len(out_triangles) > 0:  # 需要处理在平面外侧的数据
-            if node.out_node is None:
-                node.out_node = get_node_by_triangles(out_triangles)
-            task_queue.append((node.out_node, out_triangles))
-
-        if len(in_triangles) > 0:
-            if node.in_node is None:
-                node.in_node = get_node_by_triangles(in_triangles)
-            task_queue.append((node.in_node, in_triangles))
-
-    return tree
-
-cdef class SplitTask:
-    """
-    被定义用来表示一个任务
-    """
-
-    cdef public Triangle triangle
-    cdef public BSPNode node
-    cdef public int status
-
-    def __init__(self, Triangle triangle, BSPNode node, int status):
-        self.triangle = triangle
-        self.node = node
-        self.status = status
 
 cdef add_task_queue(list task_queue, BSPNode node, int status, list out_triangles):
-
     cdef Triangle triangle
 
     for triangle in out_triangles:
         task_queue.append(SplitTask(triangle, node, status))
 
-def split_triangle_mesh(mesh: o3d.open3d_pybind.geometry.TriangleMesh, BSPTree tree):
-    """
-    以一颗BSP 树,分割一个几何体,用于后续布尔运算
 
-    :param mesh:
-    :param tree:
-    :return:
-    """
-    cdef:
-        list task_queue, out_triangles, in_triangles, on_same_triangles, on_diff_triangles, out_mid, in_mid, on_same_mid, on_diff_mid
-        int angle_index
-        Triangle  triangle_mid
-        np.ndarray  vertices, mesh_angle
-
-        SplitTask task_use
-
-    # 嵌套列表,减少中间过程中的重组
-    out_triangles = []
-    in_triangles = []
-    on_same_triangles = []
-    on_diff_triangles = []
-
-    for angle_index, mesh_angle in enumerate(mesh.triangles):
-
-        vertices = np.zeros(shape=(0, 3), dtype=np.float64)
-        for i in range(3):
-            vertices = np.append(vertices, [mesh.vertices[mesh_angle[i]]], axis=0)
-
-        # 构造了三角形Triangle
-
-        triangle_mid = Triangle(vertices, mesh.triangle_normals[angle_index])
-        task_use = SplitTask(triangle_mid, tree.head, 0)
-        task_queue = [task_use]
-
-        while task_queue:  # 每一个三角形,都需要从tree 的顶部开始计算,分割出需要处理的各个子三角形
-            # surface_status_use 0 表示没有处理,
-            task_use = task_queue.pop()  # 此前计算的相关信息
-
-            out_mid, in_mid, on_same_mid, on_diff_mid = task_use.node.plane.split_triangle(task_use.triangle)
-
-            if task_use.node.out_node is None:
-                if out_mid:
-                    out_triangles.append(out_mid)  # 通过plane 切割,确定在几何体外部
-            else:
-                # 可能在内部,也可能在内部,要继续讨论
-                add_task_queue(task_queue,task_use.node.out_node,task_use.status,out_mid)
-
-            if task_use.node.in_node is None:
-
-                # 剔除曾经在表面然后现在又在内部的三角面
-                if task_use.status == 0:  # 没有出现过,在几何体表现的情况
-                    in_triangles.append(in_mid)
-                elif task_use.status == 1:  # 同向
-                    on_same_triangles.append(in_mid)
-                else:  # 异向
-                    on_diff_triangles.append(in_mid)
-
-                on_same_mid and on_same_triangles.append(on_same_mid)
-                on_diff_mid and on_diff_triangles.append(on_diff_mid)
-
-            else:  # 继续处理
-                # 仍然在内部的三角面
-                add_task_queue(task_queue,task_use.node.in_node,task_use.status,in_mid)
-
-                add_task_queue(task_queue,task_use.node.in_node,1,on_same_mid)
-                add_task_queue(task_queue,task_use.node.in_node,2,on_diff_mid)
-
-    return out_triangles, in_triangles, on_same_triangles, on_diff_triangles
