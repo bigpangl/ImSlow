@@ -10,7 +10,8 @@ import numpy as np
 from datetime import datetime
 import open3d as o3d
 
-from .core import Triangle, Plane, Node,CSG
+from .core import Triangle, Plane, Node
+from .csg import CSG
 
 logging.basicConfig(level=logging.DEBUG)
 

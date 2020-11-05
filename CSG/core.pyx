@@ -15,7 +15,6 @@ import traceback
 import random
 import numpy as np
 cimport numpy as np
-from datetime import datetime
 
 np.import_array()
 
@@ -256,7 +255,6 @@ cdef Plane get_plane_try_pca(list triangles):
         quality = 1 - (on_n / TRIANGLE_NUMBER) - (out_n - mid_n) ** 2 - (in_n - mid_n) ** 2
         if quality < PCA_CHECK_VALUE:  # 说明此时选取的平面集,不适合用pca 做平面分割
             plane = Plane.from_points(triangles[0].Vertices[0], triangles[0].Vertices[1], triangles[0].Vertices[2])
-
     else:
         plane = Plane.from_points(triangles[0].Vertices[0], triangles[0].Vertices[1], triangles[0].Vertices[2])
 
@@ -291,8 +289,8 @@ cdef class Node:
         node.triangles = [triangle.clone() for triangle in self.triangles]
         return node
 
-    # 翻转几何体?
-    cpdef invert(self):
+    #翻转几何体?递归
+    cpdef void invert(self):
         cdef:
             Triangle triangle
 
@@ -307,8 +305,54 @@ cdef class Node:
 
         self.front, self.back = self.back, self.front  # 反过来
 
+    # 翻转几何,列表做堆栈
+    # cpdef void invert(self):
+    #     cdef:
+    #         Triangle triangle
+    #         list task_que = [self]
+    #         Node node
+    #     while task_que:
+    #         node = task_que.pop()
+    #
+    #         for triangle in node.triangles:
+    #             triangle.flip()
+    #         node.plane.flip()
+    #
+    #         node.front, node.back = node.back, node.front  # 反过来
+    #
+    #         if node.front:
+    #             task_que.append(node.front)
+    #         if node.back:
+    #             task_que.append(node.back)
+
     #去除在一个bsp 树内部的三角面片后返回新的面片
-    cpdef clip_triangles(self, list triangles):
+    # cpdef clip_triangles(self, list triangles):
+    #     cdef:
+    #         list front
+    #         list back
+    #         Triangle triangle
+    #
+    #     if not self.plane:
+    #         return triangles
+    #
+    #     front = []
+    #     back = []
+    #     for triangle in triangles:
+    #         self.plane.split_triangle(triangle, front, back, front, back)
+    #
+    #     if self.front:
+    #         front = self.front.clip_triangles(front)
+    #     if self.back:
+    #         back = self.back.clip_triangles(back)
+    #     else:
+    #         back = []
+    #
+    #     front.extend(back)
+    #
+    #     return front
+
+    #去除在一个bsp 树内部的三角面片后返回新的面片
+    cpdef clip_triangles(self, list triangles, list triangles_out=None):
         cdef:
             list front
             list back
@@ -316,25 +360,27 @@ cdef class Node:
 
         if not self.plane:
             return triangles
+        if triangles_out is None:
+            triangles_out = []
 
         front = []
         back = []
+
         for triangle in triangles:
             self.plane.split_triangle(triangle, front, back, front, back)
 
         if self.front:
-            front = self.front.clip_triangles(front)
-        if self.back:
-            back = self.back.clip_triangles(back)
+            self.front.clip_triangles(front, triangles_out)
         else:
-            back = []
+            triangles_out.extend(front) # 拼接进去
 
-        front.extend(back)
+        if self.back:
+            self.back.clip_triangles(back, triangles_out)
 
-        return front
+        return triangles_out
 
     # 通过递归,遍历self 节点,将每个节点中的三角形同传入的BSP 树进行处理，得到BSP 树 内部以外的三角面片
-    cdef void clip_to(self, Node bsp):
+    cpdef void clip_to(self, Node bsp):
         self.triangles = bsp.clip_triangles(self.triangles)
         if self.front:
             self.front.clip_to(bsp)
@@ -353,7 +399,6 @@ cdef class Node:
         return triangles
 
     cpdef build(self, list triangles):
-
         cdef:
             Triangle triangle
 
@@ -363,98 +408,18 @@ cdef class Node:
         if not self.plane:
             # 在没有平面时,要尝试通过pca 进行平面拟合
             self.plane = get_plane_try_pca(triangles)
-            # triangle = triangles[0]
-            # self.plane = triangle.plane.clone()
 
         front = []
         back = []
         for triangle in triangles:
             self.plane.split_triangle(triangle, self.triangles, self.triangles, front, back)
-
         if front:
-            # logging.debug(f"处理front")
             if not self.front:
                 self.front = Node()
             self.front.build(front)
-
         if back:
-            # logging.debug(f"处理back")
             if not self.back:
                 self.back = Node()
             self.back.build(back)
 
-cdef class CSG:
-    cdef public list triangles
 
-    def __init__(self):
-        self.triangles = []
-
-    @classmethod
-    def from_trianagles(cls, triangles):
-        cdef:
-            CSG csg
-
-        csg = CSG()
-        csg.triangles = triangles
-        return csg
-
-    cpdef clone(self):
-        cdef:
-            CSG csg
-
-        csg = CSG()
-        csg.triangles = copy.deepcopy(self.triangles)
-        return csg
-
-    cpdef to_triangles(self):
-        return copy.deepcopy(self.triangles)
-
-    cpdef CSG to_union(self, CSG csg):
-        cdef:
-            Node node_a, node_b
-
-        a = Node(self.to_triangles())
-        b = Node(csg.to_triangles())
-        a.clip_to(b)
-        b.clip_to(a)
-        b.invert()
-        b.clip_to(a)
-        b.invert()
-        a.build(b.all_triangles())
-        return CSG.from_trianagles(a.all_triangles())
-
-    cpdef CSG to_subtract(self, CSG csg):
-        cdef:
-            Node node_a, node_b
-        start = datetime.now()
-        node_a = Node(self.to_triangles())
-        node_b = Node(csg.to_triangles())
-        end = datetime.now()
-        node_a.invert()
-        in_t = datetime.now()
-        node_a.clip_to(node_b)
-        node_b.clip_to(node_a)
-        clip_t = datetime.now()
-
-        node_b.invert()
-        node_b.clip_to(node_a)
-        node_b.invert()
-        node_a.build(node_b.all_triangles())
-        node_a.invert()
-        return CSG.from_trianagles(node_a.all_triangles())
-
-    cpdef CSG to_intersect(self, CSG csg):
-        cdef:
-            Node nodea, nodeb
-
-        nodea = Node(self.to_triangles())
-        nodeb = Node(csg.to_triangles())
-
-        nodea.invert()
-        nodeb.clip_to(nodea)
-        nodeb.invert()
-        nodea.clip_to(nodeb)
-        nodeb.clip_to(nodea)
-        nodea.build(nodeb.all_triangles())
-        nodea.invert()
-        return CSG.from_trianagles(nodea.all_triangles())

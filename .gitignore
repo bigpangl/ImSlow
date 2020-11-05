@@ -4,6 +4,7 @@ __pycache__
 *.ply
 CSG/core.c
 CSG/core.*.pyd
+CSG/utils.*.pyd
 CSG/core.h
 CSG/*.html
 *.cpp

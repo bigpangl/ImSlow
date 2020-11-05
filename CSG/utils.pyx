@@ -1,3 +1,5 @@
+# cython: language_level=3
+
 """
 Author:     LanHao
 Date:       2020/11/5
@@ -6,36 +8,26 @@ Python:     python3.6
 用于适配一些其他工具包重的转换功能
 
 """
-import logging
-from typing import List
-from datetime import datetime
 import numpy as np
+cimport numpy as np
 import open3d as o3d
 
 from .core import Triangle
 
 
-def log_time(func):
-    def wrapper(*args, **kwargs):
-        start = datetime.now()
-        result = func(*args, **kwargs)
-        end = datetime.now()
-        logging.debug(f"执行函数:{func.__name__}耗时:{end - start}")
-        return result
-
-    return wrapper
-
-
 class Open3dTranslate:
 
     @staticmethod
-    @log_time
-    def to_mesh(iteral: List[Triangle]):
+    def to_mesh(iteral):
         """
         这是一个容易变得费时的操作,如何优化此处的时间呢？
         :param iteral:
         :return:
         """
+        cdef:
+            list triangle_index
+            int i, index
+
         mesh = o3d.geometry.TriangleMesh()
 
         for triangle in iteral:
@@ -53,11 +45,15 @@ class Open3dTranslate:
             mesh.triangles.append(triangle_index_np)
         return mesh
 
-    @staticmethod
-    @log_time
-    def to_triangles(mesh) -> List[Triangle]:
 
-        triangles = []  # 初始化,用于存放三角形
+    @staticmethod
+    def to_triangles(mesh):
+        cdef:
+            list triangles = []
+            int triangle_index
+            np.ndarray vertices
+            # Triangle triangle
+
         for triangle_index in range(len(mesh.triangles)):  # 遍历三角形
             singe_triangle = mesh.triangles[triangle_index]
             # 存放三角形的点
