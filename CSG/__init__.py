@@ -1,8 +1,6 @@
 """
-
-Project:    ImSlow
 Author:     LanHao
-Date:       2020/10/17
+Date:       2020/11/4
 Python:     python3.6
 
 """

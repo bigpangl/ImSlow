@@ -2,9 +2,9 @@ VENV
 .idea
 __pycache__
 *.ply
-open3dExp/core.c
-open3dExp/core.*.pyd
-open3dExp/core.h
-open3dExp/*.html
+CSG/core.c
+CSG/core.*.pyd
+CSG/core.h
+CSG/*.html
 *.cpp
 build

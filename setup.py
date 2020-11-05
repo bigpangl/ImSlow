@@ -12,10 +12,10 @@ from Cython.Build import cythonize
 import numpy as np
 
 extensions = [
-    Extension("",["./open3dExp/*.pyx"],include_dirs=[np.get_include()],language = "c++",),
+    Extension("",["./CSG/*.pyx"],include_dirs=[np.get_include()],language = "c++",),
 ]
 
 setup(
-    name='open3dExp',
+    name='CSG',
     ext_modules=cythonize(extensions,annotate=True,),
 )
