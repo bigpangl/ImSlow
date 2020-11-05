@@ -39,6 +39,13 @@ cdef class Plane:
 
     @classmethod
     def from_points(cls, np.ndarray a, np.ndarray b, np.ndarray c):
+        """
+        生成三个点所在平面
+        :param a:
+        :param b:
+        :param c:
+        :return:
+        """
         cdef:
             np.ndarray normal
 
@@ -47,22 +54,22 @@ cdef class Plane:
         return cls(normal, normal.dot(a))
 
     @classmethod
-    def from_origin_normal(cls,np.ndarray origin,np.ndarray normal):
-        normal = normal/np.linalg.norm(normal)
-        return cls(normal,normal.dot(origin))
+    def from_origin_normal(cls, np.ndarray origin, np.ndarray normal):
+        normal = normal / np.linalg.norm(normal)
+        return cls(normal, normal.dot(origin))
 
     cpdef void flip(self):
         self.Normal *= -1  # 向量取反
         self.W *= -1  #参数 取反
 
     cdef Plane clone(self):  # 复制平面
-        return Plane(self.Normal.copy(), self.W)
+        return Plane(self.Normal.copy(), self.W)  # 复制此平面,防止因为在别处翻转导致原始位置发生变化s
 
     # 计算一个点到平面的距离,来自于点法式,同时提前计算了W 值以及单位向量了Normal
     cpdef float distance(self, np.ndarray vertex):
         return self.Normal.dot(vertex) - self.W
 
-    # 用一个平面分割凸多边形/三角形
+    # 用一个平面分割三角形
     cpdef void split_triangle(self, Triangle triangle, list coplanarfront, list coplanarback, list front, list back):
         cdef:
             int COPLANAR = 0
@@ -89,7 +96,7 @@ cdef class Plane:
             front.append(triangle)
         elif triangle_type == BACK:
             back.append(triangle)
-        elif triangle_type == SPANNING:
+        elif triangle_type == SPANNING:  # 被分列开了
             f_tmp = []
             b_tmp = []
             for i in range(len(triangle.Vertices)):
@@ -97,25 +104,25 @@ cdef class Plane:
                 ti = types_all[i]
                 tj = types_all[j]
 
-                vi = triangle.Vertices[i]
-                vj = triangle.Vertices[j]
+                vi = triangle.Vertices[i].copy()
+                vj = triangle.Vertices[j].copy()
 
+                # 独立的点,存放在前后
                 if ti != BACK:
                     f_tmp.append(vi)
                 if ti != FRONT:
-                    b_tmp.append(vi.copy() if ti != BACK else vi)
+                    b_tmp.append(vi.copy() if ti != BACK else vi)  # 两边都添加点?
+
                 if (ti | tj) == SPANNING:
-                    t = (self.W - self.Normal.dot(vi)) / self.Normal.dot(vj - vi)
+                    t = (self.W - self.Normal.dot(vi)) / self.Normal.dot(vj - vi)  # 求交点
                     v = vi + ((vj - vi) * t)
                     f_tmp.append(v)
                     b_tmp.append(v)
 
-                if len(f_tmp) >= 3:
-                    self.get_triangles(f_tmp, front)
-                    # front.append(Triangle(np.asarray(f_tmp)))
-                if len(b_tmp) >= 3:
-                    self.get_triangles(b_tmp, back)
-                    # back.append(Triangle(np.asarray(b_tmp)))
+            if len(f_tmp) >= 3:
+                self.get_triangles(f_tmp, front)
+            if len(b_tmp) >= 3:
+                self.get_triangles(b_tmp, back)
 
     # 满足右手定则的顺序点，返回三角形,这是自己提供的方法
     cdef list get_triangles(self, list vertices, list triangles_back=None):
@@ -193,7 +200,7 @@ cdef Plane get_plane_by_pca(np.ndarray  points):
         feat_value, feat_vec = np.linalg.eig(cov_x)  # 求解协方差矩阵的特征值和特征向量
         index = np.argsort(-feat_value)  # 依照featValue进行从大到小排序
         normal = np.cross(feat_vec[index[0]], feat_vec[index[1]])  # 中途发生了错误,关于精度的？
-        plane = Plane.from_origin_normal(average,normal) # average, normal
+        plane = Plane.from_origin_normal(average, normal)  # average, normal
     except Exception as e:
         logging.error(e)
         logging.error(cov_x)
@@ -201,7 +208,6 @@ cdef Plane get_plane_by_pca(np.ndarray  points):
     return plane
 
 cdef Plane get_plane_try_pca(list triangles):
-
     cdef:
         list out_triangles_i, in_triangles_i, on_same_i, on_diff_i
         Plane plane = None
@@ -217,9 +223,8 @@ cdef Plane get_plane_try_pca(list triangles):
         float quality
 
     triangles_n_total = len(triangles)
-    if triangles_n_total < TRIANGLE_NUMBER\
-            :
-        return Plane.from_points(triangles[0].Vertices[0], triangles[0].Vertices[1],triangles[0].Vertices[2])
+    if triangles_n_total < TRIANGLE_NUMBER:
+        return Plane.from_points(triangles[0].Vertices[0], triangles[0].Vertices[1], triangles[0].Vertices[2])
 
     triangles = random.sample(triangles, TRIANGLE_NUMBER)
 
@@ -228,14 +233,15 @@ cdef Plane get_plane_try_pca(list triangles):
         plane = get_plane_by_pca(vertices)
     except Exception as e:
         logging.error(e)
+
     if plane is not None:
         for triangle in triangles:
             out_triangles_i = []
-            in_triangles_i= []
+            in_triangles_i = []
             on_same_i = []
             on_diff_i = []
 
-            plane.split_triangle(triangle,on_same_i,on_diff_i,out_triangles_i,in_triangles_i)
+            plane.split_triangle(triangle, on_same_i, on_diff_i, out_triangles_i, in_triangles_i)
 
             if len(out_triangles_i) > 0 and len(in_triangles_i) > 0:  # 点在异侧,说明这个三角形被分割开了,splited
                 on_n += 1
@@ -249,13 +255,12 @@ cdef Plane get_plane_try_pca(list triangles):
         # 这个值越大,说明两侧越均匀,中间被分割的三角形越少,
         quality = 1 - (on_n / TRIANGLE_NUMBER) - (out_n - mid_n) ** 2 - (in_n - mid_n) ** 2
         if quality < PCA_CHECK_VALUE:  # 说明此时选取的平面集,不适合用pca 做平面分割
-            plane = Plane.from_points(triangles[0].Vertices[0], triangles[0].Vertices[1],triangles[0].Vertices[2])
+            plane = Plane.from_points(triangles[0].Vertices[0], triangles[0].Vertices[1], triangles[0].Vertices[2])
 
     else:
-        plane = Plane.from_points(triangles[0].Vertices[0], triangles[0].Vertices[1],triangles[0].Vertices[2])
+        plane = Plane.from_points(triangles[0].Vertices[0], triangles[0].Vertices[1], triangles[0].Vertices[2])
 
     return plane
-
 
 cdef class Node:
     """
