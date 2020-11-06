@@ -14,8 +14,8 @@ from CSG.utils import Open3dTranslate
 
 logging.basicConfig(level=logging.DEBUG)
 
-mesh = o3d.geometry.TriangleMesh.create_cylinder(1,5)
-# mesh = o3d.geometry.TriangleMesh.create_sphere(10)
+# mesh = o3d.geometry.TriangleMesh.create_cylinder(1,5)
+mesh = o3d.geometry.TriangleMesh.create_sphere(10)
 
 mesh2 = o3d.geometry.TriangleMesh.create_box(5, 5, 5).translate((-2, -2, -2.5))
 

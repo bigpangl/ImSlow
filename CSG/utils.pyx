@@ -12,10 +12,10 @@ import numpy as np
 cimport numpy as np
 import open3d as o3d
 
-from .core import Triangle
+from .core cimport Triangle
 
 
-class Open3dTranslate:
+cdef class Open3dTranslate:
 
     @staticmethod
     def to_mesh(iteral):
@@ -52,7 +52,7 @@ class Open3dTranslate:
             list triangles = []
             int triangle_index
             np.ndarray vertices
-            # Triangle triangle
+            Triangle triangle
 
         for triangle_index in range(len(mesh.triangles)):  # 遍历三角形
             singe_triangle = mesh.triangles[triangle_index]

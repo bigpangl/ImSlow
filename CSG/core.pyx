@@ -9,7 +9,6 @@ vector 使用numpy基础对象
 
 """
 
-import copy
 import logging
 import traceback
 import random
@@ -23,16 +22,13 @@ cdef int TRIANGLE_NUMBER = 5
 cdef float PCA_CHECK_VALUE = 0.6
 
 cdef class Plane:
-    cdef public np.ndarray Normal
-    cdef public float W  # 应该是一个点法式中的系数
-
     def __str__(self):
         return f"Normal:{self.Normal.tolist()},W:{self.W}"
 
     def __repr__(self):
         return f"<Plane:{id(self)}><{self.__str__()}>"
 
-    def __init__(self, np.ndarray normal, float w):
+    def __cinit__(self, np.ndarray normal, float w):
         self.Normal = normal
         self.W = w
 
@@ -123,17 +119,15 @@ cdef class Plane:
             if len(b_tmp) >= 3:
                 self.get_triangles(b_tmp, back)
 
-    # 满足右手定则的顺序点，返回三角形,这是自己提供的方法
-    cdef list get_triangles(self, list vertices, list triangles_back=None):
+    #满足右手定则的顺序点，返回三角形,这是自己提供的方法
+    cdef void get_triangles(self, list vertices, list triangles_back):
+
         cdef:
             list use_vertices
             np.ndarray  vertex_j
             int vertices_n = len(vertices)
             int i, j
             Triangle triangle
-
-        if triangles_back is None:
-            triangles_back = []
 
         assert vertices_n < 5, Exception("三角形在分割时,被分割出来的部分,不可能存在超过5个点")
         assert vertices_n >= 3, Exception("不应该传入小于三个点的多边形")
@@ -147,16 +141,11 @@ cdef class Plane:
             triangle = Triangle(np.asarray(use_vertices, dtype=np.float64))
             triangles_back.append(triangle)
 
-        return triangles_back
-
 cdef class Triangle:
     """
     多边形,同时也可以是三角形// 重点指三角形
     """
-    cdef public np.ndarray Vertices
-    cdef public Plane plane
-
-    def __init__(self, np.ndarray vertices):
+    def __cinit__(self, np.ndarray vertices):
         self.Vertices = vertices
         self.plane = Plane.from_points(vertices[0], vertices[1], vertices[2])
 
@@ -170,7 +159,7 @@ cdef class Triangle:
         self.Vertices = np.flipud(self.Vertices)  # 翻转并且clone 新对象
         self.plane.flip()
 
-    cpdef center(self):
+    cpdef np.ndarray center(self):
         return np.mean(self.Vertices, axis=0)
 
     def __str__(self):
@@ -264,12 +253,7 @@ cdef class Node:
     """
     定义BSP Tree 的节点
     """
-    cdef Plane plane
-    cdef Node front
-    cdef Node back
-    cdef list triangles
-
-    def __init__(self, list triangles=None):
+    def __cinit__(self, list triangles=None):
         self.plane = None
         self.front = None
         self.back = None
@@ -305,54 +289,8 @@ cdef class Node:
 
         self.front, self.back = self.back, self.front  # 反过来
 
-    # 翻转几何,列表做堆栈
-    # cpdef void invert(self):
-    #     cdef:
-    #         Triangle triangle
-    #         list task_que = [self]
-    #         Node node
-    #     while task_que:
-    #         node = task_que.pop()
-    #
-    #         for triangle in node.triangles:
-    #             triangle.flip()
-    #         node.plane.flip()
-    #
-    #         node.front, node.back = node.back, node.front  # 反过来
-    #
-    #         if node.front:
-    #             task_que.append(node.front)
-    #         if node.back:
-    #             task_que.append(node.back)
-
     #去除在一个bsp 树内部的三角面片后返回新的面片
-    # cpdef clip_triangles(self, list triangles):
-    #     cdef:
-    #         list front
-    #         list back
-    #         Triangle triangle
-    #
-    #     if not self.plane:
-    #         return triangles
-    #
-    #     front = []
-    #     back = []
-    #     for triangle in triangles:
-    #         self.plane.split_triangle(triangle, front, back, front, back)
-    #
-    #     if self.front:
-    #         front = self.front.clip_triangles(front)
-    #     if self.back:
-    #         back = self.back.clip_triangles(back)
-    #     else:
-    #         back = []
-    #
-    #     front.extend(back)
-    #
-    #     return front
-
-    #去除在一个bsp 树内部的三角面片后返回新的面片
-    cpdef clip_triangles(self, list triangles, list triangles_out=None):
+    cpdef clip_triangles(self, list triangles, list triangles_out):
         cdef:
             list front
             list back
@@ -360,8 +298,6 @@ cdef class Node:
 
         if not self.plane:
             return triangles
-        if triangles_out is None:
-            triangles_out = []
 
         front = []
         back = []
@@ -372,7 +308,7 @@ cdef class Node:
         if self.front:
             self.front.clip_triangles(front, triangles_out)
         else:
-            triangles_out.extend(front) # 拼接进去
+            triangles_out.extend(front)  # 拼接进去
 
         if self.back:
             self.back.clip_triangles(back, triangles_out)
@@ -381,24 +317,36 @@ cdef class Node:
 
     # 通过递归,遍历self 节点,将每个节点中的三角形同传入的BSP 树进行处理，得到BSP 树 内部以外的三角面片
     cpdef void clip_to(self, Node bsp):
-        self.triangles = bsp.clip_triangles(self.triangles)
+        cdef:
+            list triangles = []
+
+        bsp.clip_triangles(self.triangles, triangles)
+        self.triangles = triangles
         if self.front:
             self.front.clip_to(bsp)
         if self.back:
             self.back.clip_to(bsp)
 
-    cpdef list all_triangles(self):
+    def all_triangles(self):
+        """
+        产生一个迭代器,而不是在过程中重组各个列表
+        :return:
+        """
+        cdef:
+            Triangle triangle
+            list task_node = [self]
+            list triangles = [triangle.clone() for triangle in self.triangles]
+            Node node
+        while task_node:
+            node = task_node.pop()
+            if node.front:
+                task_node.append(node.front)
+            if node.back:
+                task_node.append(node.back)
+            for i in range(len(node.triangles)):
+                yield node.triangles[i].clone()
 
-        cdef list triangles = copy.deepcopy(self.triangles)
-
-        if self.front:
-            triangles.extend(self.front.all_triangles())
-        if self.back:
-            triangles.extend(self.back.all_triangles())
-
-        return triangles
-
-    cpdef build(self, list triangles):
+    def build(self,triangles):
         cdef:
             Triangle triangle
 
@@ -421,5 +369,3 @@ cdef class Node:
             if not self.back:
                 self.back = Node()
             self.back.build(back)
-
-

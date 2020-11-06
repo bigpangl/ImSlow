@@ -144,7 +144,7 @@ class CSGTest(unittest.TestCase):
         ])
         polygon = Triangle(vertices)
 
-    # @unittest.skip("跳过中间测试步骤,在其他地方已经使用到,间接测试")
+    @unittest.skip("跳过中间测试步骤,在其他地方已经使用到,间接测试")
     def test_bsp_node_build(self):
         # 定义一个长宽高5x5x5 的立方体
         mesh: o3d.open3d_pybind.geometry.TriangleMesh = o3d.geometry.TriangleMesh.create_sphere(10)

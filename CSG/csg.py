@@ -28,7 +28,8 @@ class CSG:
         return csg
 
     def to_triangles(self):
-        return copy.deepcopy(self.triangles)
+
+        return [triangle.clone() for triangle in self.triangles]
 
 
     def to_union(self, csg):
