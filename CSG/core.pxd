@@ -2,6 +2,8 @@
 
 cimport numpy as np
 
+cpdef  get_cos_by(np.ndarray, np.ndarray)
+
 cdef class Triangle:
     cdef public np.ndarray Vertices
     cdef public Plane plane
@@ -10,6 +12,8 @@ cdef class Triangle:
     cpdef void flip(self)
     cpdef np.ndarray center(self)
 
+    # 判断一个点相对一个三角形的位置,外部,边上,内部
+    cpdef int vertex_in(self, np.ndarray)
 
 cdef class Plane:
     cdef public np.ndarray Normal
@@ -35,3 +39,13 @@ cdef class Node:
     cpdef void invert(self)
     cpdef clip_triangles(self, list, list)
     cpdef void clip_to(self, Node)
+
+cdef class Polygon:
+    cdef public np.ndarray vertices
+    cdef public np.ndarray normal
+
+    cpdef np.ndarray get_normal(self)
+
+    cpdef list to_triangles(self)
+
+    cpdef void flip(self)

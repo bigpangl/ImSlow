@@ -9,3 +9,4 @@ CSG/core.h
 CSG/*.html
 *.cpp
 build
+*.*.pyd

@@ -8,18 +8,33 @@ Python:     python3.6
 vector 使用numpy基础对象
 
 """
-
+import math
 import logging
 import traceback
 import random
 import numpy as np
 cimport numpy as np
 
+from .linked cimport SingleLinkedNode
+
 np.import_array()
 
 cdef float EPSILON = 1e-5
 cdef int TRIANGLE_NUMBER = 5
 cdef float PCA_CHECK_VALUE = 0.6
+
+cpdef get_cos_by(np.ndarray v1, np.ndarray v2):
+    return v1.dot(v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+
+cpdef get_angle_by(np.ndarray v1, np.ndarray v2):
+    cos_value = get_cos_by(v1, v2)
+
+    if cos_value > 1:
+        cos_value = 1
+    elif cos_value < -1:
+        cos_value = -1
+
+    return math.acos(cos_value) / math.pi * 180
 
 cdef class Plane:
     def __str__(self):
@@ -161,6 +176,35 @@ cdef class Triangle:
 
     cpdef np.ndarray center(self):
         return np.mean(self.Vertices, axis=0)
+
+    # 检查一个点是否在三角形内部
+    cpdef int vertex_in(self, np.ndarray vertex):
+
+        cdef:
+            np.ndarray v1, v2, v3
+            int back = 0
+
+        if abs(self.plane.distance(vertex)) > 0:
+            back = 1
+        else:
+            v1 = self.Vertices[0] - vertex
+            v2 = self.Vertices[1] - vertex
+            v3 = self.Vertices[2] - vertex
+            angle1 = get_angle_by(v1, v2)
+            angle2 = get_angle_by(v2, v3)
+            angle3 = get_angle_by(v3, v1)
+            angles_all = angle1 + angle2 + angle3
+            if angle1 == 180 or angle2 == 180 or angle3 == 180:
+
+                back = 0
+            else:
+                # logging.debug(f"三个角度之和：{angles_all}")
+                if (360 - angles_all) <= EPSILON:  # 误差判断
+                    back = -1
+                else:
+                    back = 1
+
+        return back
 
     def __str__(self):
         """
@@ -346,9 +390,11 @@ cdef class Node:
             for i in range(len(node.triangles)):
                 yield node.triangles[i].clone()
 
-    def build(self,triangles):
+    def build(self, triangles):
         cdef:
             Triangle triangle
+            list front = []
+            list back = []
 
         if not triangles:
             return None
@@ -357,8 +403,6 @@ cdef class Node:
             # 在没有平面时,要尝试通过pca 进行平面拟合
             self.plane = get_plane_try_pca(triangles)
 
-        front = []
-        back = []
         for triangle in triangles:
             self.plane.split_triangle(triangle, self.triangles, self.triangles, front, back)
         if front:
@@ -369,3 +413,132 @@ cdef class Node:
             if not self.back:
                 self.back = Node()
             self.back.build(back)
+
+cdef class Polygon:
+    """
+    简单多边形的定义
+    """
+    def __cinit__(self, np.ndarray points):
+        self.vertices = points
+        self.normal = self.get_normal()
+
+    cpdef np.ndarray get_normal(self):
+
+        normal = None
+        for i in range(len(self.vertices) - 1):
+            point_i_front = self.vertices[i - 1]
+            point_i = self.vertices[i]
+            point_i_next = self.vertices[i + 1]
+            v1 = point_i_next - point_i
+            v2 = point_i_front - point_i
+            normal = np.cross(v1, v2)  # 多边形所在平面的法向量
+
+            front_points = 0
+            next_points = 0
+            plane = Plane.from_origin_normal(point_i, np.cross(normal, v2))
+            for point in self.vertices:
+                distnace_mid = plane.distance(point)
+                if distnace_mid > 0:
+                    front_points += 1
+                elif distnace_mid < 0:
+                    next_points += 1
+            if next_points > 0 and front_points > 0:
+                continue
+
+            front_points = 0
+            next_points = 0
+            plane = Plane.from_origin_normal(point_i, np.cross(normal, v1))
+
+            for point in self.vertices:
+                distnace_mid = plane.distance(point)
+                if distnace_mid > 0:
+                    front_points += 1
+                elif distnace_mid < 0:
+                    next_points += 1
+            if next_points > 0 and front_points > 0:
+                continue
+            break
+
+        return normal / np.linalg.norm(normal)
+
+    cpdef void flip(self):
+        self.vertices = np.flipud(self.vertices)
+        self.normal = self.normal * -1
+
+    cpdef list to_triangles(self):
+        points_plane_normal = self.get_normal()
+
+        trangles = []
+        linked = SingleLinkedNode(self.vertices[0])
+        linked_current = linked
+        linked_end = None  # 链表的尾巴
+
+        # 构建单向链表
+        for i in range(1, len(self.vertices)):
+            current_point = self.vertices[i]
+            linked_end = SingleLinkedNode(current_point)
+            linked_current.next = linked_end
+            linked_current = linked_end
+
+        linked_current = linked  # 指向链表的头
+        while True:
+            current_next = linked_current.next  # 第i+1
+            current_next_2 = current_next and current_next.next  # 第i+2
+            point_1 = linked_current.vertex
+            point_2 = current_next and current_next.vertex
+            point_3 = current_next_2 and current_next_2.vertex
+            if point_1 is not None and point_2 is not None and point_3 is not None:
+                # 判断不共点以及共线
+                if np.linalg.norm(point_1 - point_2) == 0:
+                    current_next.next = None  # 孤立此点
+                    linked_current.next = current_next_2  # head 位置未移动,少了一个点,本次逻辑中不会出现
+                    continue
+                if np.linalg.norm(point_3 - point_2) == 0:
+                    current_next.next = current_next_2.next
+                    current_next_2.next = None
+                    continue
+                triangle = Triangle(np.asarray([point_1, point_2, point_3]))
+                v1 = point_1 - point_2
+                v2 = point_3 - point_2
+                normal_t = np.cross(v2, v1)
+                if 1 - get_cos_by(v1, v2) < 1e-5:
+                    # 共线三角形
+                    linked_current.next = current_next_2
+                    continue
+
+                if get_cos_by(normal_t, points_plane_normal) > 0:
+                    # 凸角
+                    # 判断其他点不在此三角形内部
+                    node_check = current_next_2.next  # 从下一个点开始检查
+
+                    status = True
+                    while node_check:
+                        point_check = node_check.vertex
+                        status_check = triangle.vertex_in(point_check)
+                        if status_check <= 0:
+                            status = False
+                            break
+                        else:
+                            node_check = node_check.next
+
+                    if status:
+                        trangles.append(triangle)
+                        linked_current.next = current_next_2
+                        current_next.next = None
+
+                    else:
+                        # 是凸角但是有别的顶点在此三角形内部
+                        linked_end.next = linked_current
+                        linked_current.next = None
+                        linked_end = linked_current
+                        linked_current = current_next  # 滚动现在的顶角
+                else:
+                    # 不是凸角
+                    linked_end.next = linked_current
+                    linked_current.next = None
+                    linked_end = linked_current  # end 移动到真实位置
+                    linked_current = current_next  # 滚动现在的顶角
+
+            else:
+                break
+        return trangles

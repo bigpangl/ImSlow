@@ -1,3 +1,5 @@
+# cython: language_level=3
+
 """
 Author:     LanHao
 Date:       2020/11/5
@@ -11,9 +13,8 @@ from .core import Node
 
 
 class CSG:
-    triangles: List
-
-    def __init__(self):
+    triangles:List
+    def __cinit__(self):
         self.triangles = []
 
     @classmethod
