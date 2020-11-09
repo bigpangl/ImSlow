@@ -360,7 +360,7 @@ class PolygonTest(unittest.TestCase):
         mesh = mesh.sample_points_uniformly(number_of_points=150000)
         o3d.visualization.draw_geometries([mesh])
 
-    # @unittest.skip("暂时性跳过")
+    @unittest.skip("暂时性跳过")
     def test_stairs(self):
         """
         用于尝试楼梯主体的拉伸和合并
@@ -432,6 +432,20 @@ class PolygonTest(unittest.TestCase):
 
         o3d.visualization.draw_geometries([mesh])
 
+
+class PcaTest(unittest.TestCase):
+    def test_plane_data(self):
+        normal = np.asarray([-0.8910065241883504, -0.4539904997395813, -4.021878553617213e-15])
+        w = -283.0703430175781
+
+        vertices = np.asarray([[275.72949016875157, 82.3664424312258, 193.41275001514637],
+         [275.3848393917956, 83.0428576668101, 188.19825027085392],
+         [275.62978906177324, 82.56211687119202, 185.83636853366346]])
+
+        triangle = Triangle(vertices)
+        logging.debug(triangle)
+        for vertex in vertices:
+            logging.debug(f"distance:{triangle.plane.distance(vertex)}")
 
 if __name__ == '__main__':
     unittest.main()

@@ -20,7 +20,7 @@ cdef class Plane:
     cdef public float W
 
     cpdef void flip(self)
-    cdef Plane clone(self)
+    cpdef Plane clone(self)
     cpdef float distance(self, np.ndarray)
     cpdef void split_triangle(self, Triangle, list, list, list, list)
     cdef void  get_triangles(self, list, list)

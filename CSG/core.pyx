@@ -20,6 +20,7 @@ from .linked cimport SingleLinkedNode
 np.import_array()
 
 cdef float EPSILON = 1e-5
+cdef float DISTANCE_EPSILON = 1e-4
 cdef int TRIANGLE_NUMBER = 5
 cdef float PCA_CHECK_VALUE = 0.6
 
@@ -72,7 +73,7 @@ cdef class Plane:
         self.Normal *= -1  # 向量取反
         self.W *= -1  #参数 取反
 
-    cdef Plane clone(self):  # 复制平面
+    cpdef Plane clone(self):  # 复制平面
         return Plane(self.Normal.copy(), self.W)  # 复制此平面,防止因为在别处翻转导致原始位置发生变化s
 
     # 计算一个点到平面的距离,来自于点法式,同时提前计算了W 值以及单位向量了Normal
@@ -96,15 +97,19 @@ cdef class Plane:
 
         for vertice in triangle.Vertices:
             t_tmp = self.distance(vertice)
-            type_tmp = BACK if (t_tmp < -EPSILON) else (FRONT if t_tmp > EPSILON else COPLANAR)
+            # logging.debug(f"distance:{type_tmp}")
+            type_tmp = BACK if (t_tmp < -DISTANCE_EPSILON) else (FRONT if t_tmp > DISTANCE_EPSILON else COPLANAR)
             triangle_type |= type_tmp
             types_all.append(type_tmp)
 
         if triangle_type == COPLANAR:
+            # logging.debug(f"此处分割的三角形在coplanarfront/back 添加")
             (coplanarfront if self.Normal.dot(triangle.plane.Normal) > 0 else coplanarback).append(triangle)
         elif triangle_type == FRONT:
+            # logging.debug(f"此处分割的三角形在 front 添加")
             front.append(triangle)
         elif triangle_type == BACK:
+            # logging.debug(f"此处分割的三角形在 back 添加")
             back.append(triangle)
         elif triangle_type == SPANNING:  # 被分列开了
             f_tmp = []
@@ -128,11 +133,11 @@ cdef class Plane:
                     v = vi + ((vj - vi) * t)
                     f_tmp.append(v)
                     b_tmp.append(v)
-
             if len(f_tmp) >= 3:
                 self.get_triangles(f_tmp, front)
             if len(b_tmp) >= 3:
                 self.get_triangles(b_tmp, back)
+
 
     #满足右手定则的顺序点，返回三角形,这是自己提供的方法
     cdef void get_triangles(self, list vertices, list triangles_back):
@@ -287,9 +292,14 @@ cdef Plane get_plane_try_pca(list triangles):
         # 这个值越大,说明两侧越均匀,中间被分割的三角形越少,
         quality = 1 - (on_n / TRIANGLE_NUMBER) - (out_n - mid_n) ** 2 - (in_n - mid_n) ** 2
         if quality < PCA_CHECK_VALUE:  # 说明此时选取的平面集,不适合用pca 做平面分割
-            plane = Plane.from_points(triangles[0].Vertices[0], triangles[0].Vertices[1], triangles[0].Vertices[2])
+            # logging.debug(f"丢弃pca 选择")
+            plane = triangles[0].plane.clone()
+            # plane = Plane.from_points(triangles[0].Vertices[0], triangles[0].Vertices[1], triangles[0].Vertices[2])
+        # else:
+            # logging.debug(f"使用了PCA 平面")
     else:
-        plane = Plane.from_points(triangles[0].Vertices[0], triangles[0].Vertices[1], triangles[0].Vertices[2])
+        plane = triangles[0].plane.clone()
+        # plane = Plane.from_points(triangles[0].Vertices[0], triangles[0].Vertices[1], triangles[0].Vertices[2])
 
     return plane
 
@@ -302,6 +312,7 @@ cdef class Node:
         self.front = None
         self.back = None
         self.triangles = []
+        # logging.debug(f"triangles 不为空,需要进行build")
         if triangles:
             self.build(triangles)
 
@@ -319,24 +330,34 @@ cdef class Node:
 
     #翻转几何体?递归
     cpdef void invert(self):
+        # cdef:
+        #     list task_que = [self]
+        #     Triangle triangle
+        #
+        # while task_que:
+        #     # logging.debug(f"剩余task数量:{len(task_que)}")
+        #     node = task_que.pop()
+        #     for triangle in node.triangles:
+        #         triangle.flip()
+        #     node.plane.flip()
+        #     node.front, node.back = node.back, node.front  # 反过来
+        #     if node.front:
+        #         task_que.append(node.front)
+        #     if node.back:
+        #         task_que.append(node.back)
         cdef:
-            list task_que = [self]
             Triangle triangle
 
-        while task_que:
-            node = task_que.pop()
-            for triangle in node.triangles:
-                triangle.flip()
-            node.plane.flip()
+        for triangle in self.triangles:
+            triangle.flip()
+        self.plane.flip()
 
-            if node.front:
-                task_que.append(node.front)
-                # self.front.invert()
-            if node.back:
-                task_que.append(node.back)
-                # self.back.invert()
+        if self.front:
+            self.front.invert()
+        if self.back:
+            self.back.invert()
 
-            node.front, node.back = node.back, node.front  # 反过来
+        self.front, self.back = self.back, self.front  # 反过来
 
     #去除在一个bsp 树内部的三角面片后返回新的面片
     cpdef clip_triangles(self, list triangles, list triangles_out):
@@ -366,19 +387,28 @@ cdef class Node:
 
     # 通过递归,遍历self 节点,将每个节点中的三角形同传入的BSP 树进行处理，得到BSP 树 内部以外的三角面片
     cpdef void clip_to(self, Node bsp):
+        # cdef:
+        #     list triangles
+        #     list task_que = [self]
+        #
+        # while task_que:
+        #     node = task_que.pop()
+        #     triangles = []
+        #     bsp.clip_triangles(node.triangles, triangles)
+        #     node.triangles = triangles
+        #     if node.front:
+        #         task_que.append(node.front)
+        #     if node.back:
+        #         task_que.append(node.back)
         cdef:
-            list triangles
-            list task_que = [self]
+            list triangles = []
 
-        while task_que:
-            node = task_que.pop()
-            triangles = []
-            bsp.clip_triangles(node.triangles, triangles)
-            node.triangles = triangles
-            if node.front:
-                task_que.append(node.front)
-            if node.back:
-                task_que.append(node.back)
+        bsp.clip_triangles(self.triangles, triangles)
+        self.triangles = triangles
+        if self.front:
+            self.front.clip_to(bsp)
+        if self.back:
+            self.back.clip_to(bsp)
 
     def all_triangles(self):
         """
@@ -390,6 +420,7 @@ cdef class Node:
             list task_node = [self]
             list triangles = [triangle.clone() for triangle in self.triangles]
             Node node
+            list triangles_back = []
         while task_node:
             node = task_node.pop()
             if node.front:
@@ -397,31 +428,48 @@ cdef class Node:
             if node.back:
                 task_node.append(node.back)
             for i in range(len(node.triangles)):
-                yield node.triangles[i].clone()
-
+                triangles_back.append(node.triangles[i].clone())
+                # yield node.triangles[i].clone()
+        return triangles_back
     def build(self, triangles):
+        # 出现结果异常,会不断导致创建新的节点,生成选择plane 无法
         cdef:
             Triangle triangle
-            list front = []
-            list back = []
+            list front
+            list back
+            list task_que = [(self,triangles)]
 
-        if not triangles:
-            return None
+        while task_que:
+            front = []
+            back = []
+            node_current,triangles_current = task_que.pop()
+            # logging.debug(f"初始化的数据:{len(triangles_current)}")
 
-        if not self.plane:
-            # 在没有平面时,要尝试通过pca 进行平面拟合
-            self.plane = get_plane_try_pca(triangles)
+            if not triangles_current:
+                continue
 
-        for triangle in triangles:
-            self.plane.split_triangle(triangle, self.triangles, self.triangles, front, back)
-        if front:
-            if not self.front:
-                self.front = Node()
-            self.front.build(front)
-        if back:
-            if not self.back:
-                self.back = Node()
-            self.back.build(back)
+            if not node_current.plane:
+                # 在没有平面时,要尝试通过pca 进行平面拟合
+                node_current.plane = get_plane_try_pca(triangles_current)
+            # logging.debug(f"平面选择:{node_current.plane}")
+            # logging.debug(f"需要处理的三角形数据:{triangles_current}")
+            for triangle in triangles_current:
+                node_current.plane.split_triangle(triangle, node_current.triangles, node_current.triangles, front, back)
+            # logging.debug(f"total:{len(triangles_current)},front:{len(front)},back:{len(back)}")
+
+            if front:
+                if not node_current.front:
+                    # logging.debug(f"front 自定义")
+                    node_current.front = Node()
+                task_que.append((node_current.front,front))
+
+                # self.front.build(front)
+            if back:
+                if not node_current.back:
+                    # logging.debug(f"back 自定义")
+                    node_current.back = Node()
+                task_que.append((node_current.back,back))
+                # self.back.build(back)
 
 cdef class Polygon:
     """

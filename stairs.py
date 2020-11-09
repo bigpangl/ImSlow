@@ -49,6 +49,7 @@ for key, value in data.items():
     direction = np.asarray([stretch["x"], stretch["y"], stretch["z"]]) * length
     mesh = stretching_mesh(points, direction)
     meshs.append(mesh)
+    # break
 
 # 合并
 csg = None
@@ -67,19 +68,23 @@ open_holes = [{"x": 300.0, "y": 100.0, "z": 257.88366668686183, "r": 30.0, "d": 
                "length": 168.16251284070796},
               {"x": 970.0, "y": 2680.0, "z": 1590.883666686862, "r": 30, "d": {"x": 0, "y": 0, "z": -1},
                "length": 168.16251284070796}]
-mesh = Open3dTranslate.to_mesh(csg.to_triangles())
-mesh = mesh.sample_points_uniformly(number_of_points=300000)
+# mesh = Open3dTranslate.to_mesh(csg.to_triangles())
+# mesh = mesh.sample_points_uniformly(number_of_points=300000)
+#
+# o3d.visualization.draw_geometries([mesh])
 
-o3d.visualization.draw_geometries([mesh])
-
+holes = []
 
 for hole in open_holes:
-    hole_mesh = o3d.geometry.TriangleMesh.create_cylinder(hole["r"],hole["length"])
+    hole_mesh = o3d.geometry.TriangleMesh.create_cylinder(hole["r"],hole["length"]+50)
     hole_mesh.translate((hole["x"],hole["y"],hole["z"]-hole["length"]/2))
+    # holes.append(hole_mesh)
+
     csg_mid = CSG.from_trianagles(Open3dTranslate.to_triangles(hole_mesh))
-    csg = csg.to_union(csg_mid)
-
+    logging.debug(f"open hole 开口初始化CSG 完成")
+    csg = csg.to_subtract(csg_mid)
+    # logging.debug(f"完成一个开口")
 mesh = Open3dTranslate.to_mesh(csg.to_triangles())
-mesh = mesh.sample_points_uniformly(number_of_points=300000)
-
-o3d.visualization.draw_geometries([mesh])
+mesh = mesh.sample_points_uniformly(number_of_points=900000)
+holes.append(mesh)
+o3d.visualization.draw_geometries(holes)

@@ -7,6 +7,7 @@ Python:     python3.6
 
 """
 import copy
+import logging
 from typing import List
 
 from .core import Node
@@ -47,14 +48,20 @@ class CSG:
 
     def to_subtract(self, csg):
         node_a = Node(self.to_triangles())
+        logging.debug(f"结束A 节点的初始化")
         node_b = Node(csg.to_triangles())
+        logging.debug(f"结束B 节点初始化")
         node_a.invert()
+        logging.debug(f"完成翻转")
         node_a.clip_to(node_b)
         node_b.clip_to(node_a)
+        logging.debug(f"完成切割")
         node_b.invert()
         node_b.clip_to(node_a)
+        logging.debug(f"完成再次切割")
         node_b.invert()
         node_a.build(node_b.all_triangles())
+        logging.debug(f"rebuild")
         node_a.invert()
         return CSG.from_trianagles(node_a.all_triangles())
 
