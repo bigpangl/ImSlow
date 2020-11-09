@@ -320,18 +320,23 @@ cdef class Node:
     #翻转几何体?递归
     cpdef void invert(self):
         cdef:
+            list task_que = [self]
             Triangle triangle
 
-        for triangle in self.triangles:
-            triangle.flip()
-        self.plane.flip()
+        while task_que:
+            node = task_que.pop()
+            for triangle in node.triangles:
+                triangle.flip()
+            node.plane.flip()
 
-        if self.front:
-            self.front.invert()
-        if self.back:
-            self.back.invert()
+            if node.front:
+                task_que.append(node.front)
+                # self.front.invert()
+            if node.back:
+                task_que.append(node.back)
+                # self.back.invert()
 
-        self.front, self.back = self.back, self.front  # 反过来
+            node.front, node.back = node.back, node.front  # 反过来
 
     #去除在一个bsp 树内部的三角面片后返回新的面片
     cpdef clip_triangles(self, list triangles, list triangles_out):
@@ -362,14 +367,18 @@ cdef class Node:
     # 通过递归,遍历self 节点,将每个节点中的三角形同传入的BSP 树进行处理，得到BSP 树 内部以外的三角面片
     cpdef void clip_to(self, Node bsp):
         cdef:
-            list triangles = []
+            list triangles
+            list task_que = [self]
 
-        bsp.clip_triangles(self.triangles, triangles)
-        self.triangles = triangles
-        if self.front:
-            self.front.clip_to(bsp)
-        if self.back:
-            self.back.clip_to(bsp)
+        while task_que:
+            node = task_que.pop()
+            triangles = []
+            bsp.clip_triangles(node.triangles, triangles)
+            node.triangles = triangles
+            if node.front:
+                task_que.append(node.front)
+            if node.back:
+                task_que.append(node.back)
 
     def all_triangles(self):
         """

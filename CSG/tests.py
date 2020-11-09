@@ -415,12 +415,17 @@ class PolygonTest(unittest.TestCase):
                        "length": 168.16251284070796},
                       {"x": 970.0, "y": 2680.0, "z": 1590.883666686862, "r": 30, "d": {"x": 0, "y": 0, "z": -1},
                        "length": 168.16251284070796}]
+        mesh = Open3dTranslate.to_mesh(csg.to_triangles())
+        mesh = mesh.sample_points_uniformly(number_of_points=300000)
 
-        # for hole in open_holes:
-        #     hole_mesh = o3d.geometry.TriangleMesh.create_cylinder(hole["r"],hole["length"])
-        #     hole_mesh.translate((hole["x"],hole["y"],hole["z"]-hole["length"]/2))
-        #     csg_mid = CSG.from_trianagles(Open3dTranslate.to_triangles(hole_mesh))
-        #     csg = csg.to_union(csg_mid)
+        o3d.visualization.draw_geometries([mesh])
+
+
+        for hole in open_holes:
+            hole_mesh = o3d.geometry.TriangleMesh.create_cylinder(hole["r"],hole["length"])
+            hole_mesh.translate((hole["x"],hole["y"],hole["z"]-hole["length"]/2))
+            csg_mid = CSG.from_trianagles(Open3dTranslate.to_triangles(hole_mesh))
+            csg = csg.to_union(csg_mid)
 
         mesh = Open3dTranslate.to_mesh(csg.to_triangles())
         mesh = mesh.sample_points_uniformly(number_of_points=300000)
