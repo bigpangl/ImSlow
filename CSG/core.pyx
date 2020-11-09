@@ -19,16 +19,25 @@ from .linked cimport SingleLinkedNode
 
 np.import_array()
 
-cdef float EPSILON = 1e-5
-cdef float DISTANCE_EPSILON = 1e-4
+cdef float EPSILON = 1e-10
+cdef float DISTANCE_EPSILON = EPSILON
 cdef int TRIANGLE_NUMBER = 5
 cdef float PCA_CHECK_VALUE = 0.6
 
 cpdef get_cos_by(np.ndarray v1, np.ndarray v2):
-    return v1.dot(v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+    # 仅保留计算值本身的精度,不人工进行取舍
+    cdef:
+        double v1_length = np.linalg.norm(v1)
+        double v2_length = np.linalg.norm(v2)
+
+    assert v1_length != 0, Exception(f"计算向量角度,向量长度不可以为0,{v1}")
+    assert v2_length != 0, Exception(f"计算向量角度,向量长度不可以为0,{v2}")
+
+    return v1.dot(v2) / (v1_length * v2_length)
 
 cpdef get_angle_by(np.ndarray v1, np.ndarray v2):
-    cos_value = get_cos_by(v1, v2)
+    # 仅保留计算值本身的精度,不人工进行取舍
+    cdef float cos_value = get_cos_by(v1, v2)
 
     if cos_value > 1:
         cos_value = 1
@@ -44,7 +53,8 @@ cdef class Plane:
     def __repr__(self):
         return f"<Plane:{id(self)}><{self.__str__()}>"
 
-    def __cinit__(self, np.ndarray normal, float w):
+    def __cinit__(self, np.ndarray origin, np.ndarray normal, float w):
+        self.Origin = origin
         self.Normal = normal
         self.W = w
 
@@ -59,29 +69,46 @@ cdef class Plane:
         """
         cdef:
             np.ndarray normal
+            float normal_distance
 
         normal = np.cross(b - a, c - a)
-        normal = normal / np.linalg.norm(normal)  #单位长度
-        return cls(normal, normal.dot(a))
+        normal_distance = np.linalg.norm(normal)
+        assert normal_distance > 0, Exception(
+            f"法向量长度为0:{normal_distance},三个点存在共点:{a},{b},{c},{b - a},{c - a}\r\n{traceback.format_exc()}")
+        normal = normal / normal_distance  #单位长度
+        return cls(a, normal, normal.dot(a))
 
     @classmethod
     def from_origin_normal(cls, np.ndarray origin, np.ndarray normal):
         normal = normal / np.linalg.norm(normal)
-        return cls(normal, normal.dot(origin))
+        return cls(origin, normal, normal.dot(origin))
 
     cpdef void flip(self):
         self.Normal *= -1  # 向量取反
         self.W *= -1  #参数 取反
 
     cpdef Plane clone(self):  # 复制平面
-        return Plane(self.Normal.copy(), self.W)  # 复制此平面,防止因为在别处翻转导致原始位置发生变化s
+        return Plane(self.Origin.copy(), self.Normal.copy(), self.W)  # 复制此平面,防止因为在别处翻转导致原始位置发生变化s
 
     # 计算一个点到平面的距离,来自于点法式,同时提前计算了W 值以及单位向量了Normal
     cpdef float distance(self, np.ndarray vertex):
-        return self.Normal.dot(vertex) - self.W
+        # 会人工进行精度上的取舍
+        cdef:
+            float distance = 0
+            float angle
+            np.ndarray vector_origin_v = vertex - self.Origin
+
+        if np.linalg.norm(vector_origin_v) > EPSILON:  # 计算距离的点到平面origin 点距离相当远
+            angle = get_angle_by(vector_origin_v, self.Normal)  # 如果在90°就返回0
+            if abs(90 - angle) > EPSILON:
+                distance = self.Normal.dot(vertex) - self.W
+                if abs(distance) < DISTANCE_EPSILON:
+                    distance = 0
+        return distance
 
     # 用一个平面分割三角形
     cpdef void split_triangle(self, Triangle triangle, list coplanarfront, list coplanarback, list front, list back):
+        # 求三角形交点的方式是错误的
         cdef:
             int COPLANAR = 0
             int FRONT = 1
@@ -138,7 +165,6 @@ cdef class Plane:
             if len(b_tmp) >= 3:
                 self.get_triangles(b_tmp, back)
 
-
     #满足右手定则的顺序点，返回三角形,这是自己提供的方法
     cdef void get_triangles(self, list vertices, list triangles_back):
 
@@ -157,9 +183,12 @@ cdef class Plane:
             for j in range(3):
                 vertex_j = vertices[(i + j) % vertices_n]
                 use_vertices.append(vertex_j)
-
-            triangle = Triangle(np.asarray(use_vertices, dtype=np.float64))
-            triangles_back.append(triangle)
+            try:
+                triangle = Triangle(np.asarray(use_vertices, dtype=np.float64))
+                triangles_back.append(triangle)
+            except Exception as e:
+                logging.error(e)
+                logging.error(traceback.format_exc())
 
 cdef class Triangle:
     """
@@ -200,11 +229,10 @@ cdef class Triangle:
             angle3 = get_angle_by(v3, v1)
             angles_all = angle1 + angle2 + angle3
             if angle1 == 180 or angle2 == 180 or angle3 == 180:
-
                 back = 0
             else:
                 # logging.debug(f"三个角度之和：{angles_all}")
-                if (360 - angles_all) <= EPSILON:  # 误差判断
+                if abs((360 - angles_all)) <= EPSILON:  # 误差判断
                     back = -1
                 else:
                     back = 1
@@ -294,9 +322,6 @@ cdef Plane get_plane_try_pca(list triangles):
         if quality < PCA_CHECK_VALUE:  # 说明此时选取的平面集,不适合用pca 做平面分割
             # logging.debug(f"丢弃pca 选择")
             plane = triangles[0].plane.clone()
-            # plane = Plane.from_points(triangles[0].Vertices[0], triangles[0].Vertices[1], triangles[0].Vertices[2])
-        # else:
-            # logging.debug(f"使用了PCA 平面")
     else:
         plane = triangles[0].plane.clone()
         # plane = Plane.from_points(triangles[0].Vertices[0], triangles[0].Vertices[1], triangles[0].Vertices[2])
@@ -437,12 +462,12 @@ cdef class Node:
             Triangle triangle
             list front
             list back
-            list task_que = [(self,triangles)]
+            list task_que = [(self, triangles)]
 
         while task_que:
             front = []
             back = []
-            node_current,triangles_current = task_que.pop()
+            node_current, triangles_current = task_que.pop()
             # logging.debug(f"初始化的数据:{len(triangles_current)}")
 
             if not triangles_current:
@@ -461,14 +486,14 @@ cdef class Node:
                 if not node_current.front:
                     # logging.debug(f"front 自定义")
                     node_current.front = Node()
-                task_que.append((node_current.front,front))
+                task_que.append((node_current.front, front))
 
                 # self.front.build(front)
             if back:
                 if not node_current.back:
                     # logging.debug(f"back 自定义")
                     node_current.back = Node()
-                task_que.append((node_current.back,back))
+                task_que.append((node_current.back, back))
                 # self.back.build(back)
 
 cdef class Polygon:
@@ -515,7 +540,6 @@ cdef class Polygon:
             if next_points > 0 and front_points > 0:
                 continue
             break
-
         return normal / np.linalg.norm(normal)
 
     cpdef void flip(self):
@@ -554,15 +578,21 @@ cdef class Polygon:
                     current_next.next = current_next_2.next
                     current_next_2.next = None
                     continue
-                triangle = Triangle(np.asarray([point_1, point_2, point_3]))
+
                 v1 = point_1 - point_2
                 v2 = point_3 - point_2
                 normal_t = np.cross(v2, v1)
+                if np.linalg.norm(normal_t) == 0:  # 相邻三个点,共线
+                    current_next.next = current_next_2
+                    current_next.next = None
+                    continue
+
                 if 1 - get_cos_by(v1, v2) < 1e-5:
                     # 共线三角形
                     linked_current.next = current_next_2
                     continue
 
+                triangle = Triangle(np.asarray([point_1, point_2, point_3]))
                 if get_cos_by(normal_t, points_plane_normal) > 0:
                     # 凸角
                     # 判断其他点不在此三角形内部
@@ -595,7 +625,6 @@ cdef class Polygon:
                     linked_current.next = None
                     linked_end = linked_current  # end 移动到真实位置
                     linked_current = current_next  # 滚动现在的顶角
-
             else:
                 break
         return trangles

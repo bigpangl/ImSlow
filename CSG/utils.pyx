@@ -9,6 +9,7 @@ Python:     python3.6
 
 """
 import math
+import logging
 import numpy as np
 cimport numpy as np
 import open3d as o3d
@@ -76,9 +77,7 @@ cpdef stretching_mesh(np.ndarray vertices, np.ndarray direction):
         v_one = np.flipud(v_one)  # 底面朝向应该和拉伸方向相反
     else:
         v_use = np.flipud(v_use)
-
     triangles = polygon.to_triangles()
-
     points2 = v_use + direction
     points_2_use = v_one + direction  # 记录朝向相关问题
 
@@ -97,7 +96,6 @@ cpdef stretching_mesh(np.ndarray vertices, np.ndarray direction):
         point_i2_up = points_2_use[(i + 1) % number_length]
         triangles.append(Triangle(np.asarray([point_i, point_i_up, point_i2_up])))
         triangles.append(Triangle(np.asarray([point_i2_up, point_i2, point_i])))
-    #
     triangles.append(Triangle(np.asarray([v_one[-1], points_2_use[-1], points_2_use[0]])))
     triangles.append(Triangle(np.asarray([points_2_use[0], v_one[0], v_one[-1]])))
 

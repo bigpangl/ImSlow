@@ -16,6 +16,7 @@ cdef class Triangle:
     cpdef int vertex_in(self, np.ndarray)
 
 cdef class Plane:
+    cdef public np.ndarray Origin
     cdef public np.ndarray Normal
     cdef public float W
 
