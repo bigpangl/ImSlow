@@ -14,7 +14,9 @@ import numpy as np
 cimport numpy as np
 import open3d as o3d
 
-from .core cimport Triangle, Polygon, get_cos_by
+from EarClipping.core import clipping, green_value, Plane as Clipplane
+
+from .core cimport Triangle, get_cos_by
 
 cdef class Open3dTranslate:
     @staticmethod
@@ -65,39 +67,47 @@ cdef class Open3dTranslate:
         return triangles
 
 # 实现基于简单多边形的几何体拉伸
-cpdef stretching_mesh(np.ndarray vertices, np.ndarray direction):
-    v_one = vertices
-    v_use = vertices
+cpdef stretching_mesh(np.ndarray vertices, np.ndarray direction, clip_plane):
+    triangles = []
+    plane_normal_cos = get_cos_by(clip_plane.normal, direction)
+    if plane_normal_cos == 0:
+        raise Exception("不可斜着拉伸")
+    elif plane_normal_cos < 0:
+        # 使得得到的平面的法向量和拉伸方向在一个夹角小于90°的范围内
+        clip_plane = Clipplane(clip_plane.v_bais.copy(), clip_plane.u_bais.copy(), clip_plane.origin.copy())
 
-    polygon = Polygon(v_one)
-    cos_value = get_cos_by(polygon.normal, direction)
-    if cos_value > 0:
-        # 同向需要转向
-        polygon.flip()
-        v_one = np.flipud(v_one)  # 底面朝向应该和拉伸方向相反
-    else:
-        v_use = np.flipud(v_use)
-    triangles = polygon.to_triangles()
-    points2 = v_use + direction
-    points_2_use = v_one + direction  # 记录朝向相关问题
+    point_np_all = []
+    for point in vertices:
+        uv = clip_plane.uv(point)
+        point_np_all.append(uv)
 
-    polygon2 = Polygon(points2)
-    cos_value = get_cos_by(polygon2.normal, direction)
+    value_check = green_value(point_np_all)
+    if value_check < 0:
+        point_np_all = np.flipud(point_np_all)  # 如果是顺时针,就转向所有的点
 
-    triangles2 = polygon2.to_triangles()
+    data = clipping(point_np_all)
 
-    triangles.extend(triangles2)
-    number_length = len(v_one)
-    for i in range(number_length - 1):
-        point_i = v_one[i]
-        point_i_up = points_2_use[i]
+    for triangle in data:
+        v1 = clip_plane.to_xyz(triangle[0])
+        v2 = clip_plane.to_xyz(triangle[1])
+        v3 = clip_plane.to_xyz(triangle[2])
+        triangle_mid = Triangle(np.asarray([v1, v2, v3]))
+        triangle_2 = triangle_mid.clone()
+        triangle_2.Vertices += direction
+        triangle_mid.flip()  # 强制逆时针后,必须转向
+        triangles.append(triangle_mid)
+        triangles.append(triangle_2)  #
 
-        point_i2 = v_one[(i + 1) % number_length]
-        point_i2_up = points_2_use[(i + 1) % number_length]
-        triangles.append(Triangle(np.asarray([point_i, point_i_up, point_i2_up])))
-        triangles.append(Triangle(np.asarray([point_i2_up, point_i2, point_i])))
-    triangles.append(Triangle(np.asarray([v_one[-1], points_2_use[-1], points_2_use[0]])))
-    triangles.append(Triangle(np.asarray([points_2_use[0], v_one[0], v_one[-1]])))
-
+    number_length = len(point_np_all)
+    for i in range(number_length):
+        point_i = clip_plane.to_xyz(point_np_all[i%number_length])
+        point_i_up = point_i + direction
+        point_i2 = clip_plane.to_xyz(point_np_all[(i + 1) % number_length])
+        point_i2_up = point_i2 + direction
+        # 顺时针的方向
+        triangle_1 = Triangle(np.asarray([point_i, point_i2_up,point_i_up]))
+        triangle_2 = Triangle(np.asarray([point_i2_up, point_i,point_i2]))
+        triangles.append(triangle_1)
+        triangles.append(triangle_2)
     mesh = Open3dTranslate.to_mesh(triangles)
     return mesh

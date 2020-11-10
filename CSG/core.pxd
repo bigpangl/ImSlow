@@ -40,13 +40,3 @@ cdef class Node:
     cpdef void invert(self)
     cpdef clip_triangles(self, list, list)
     cpdef void clip_to(self, Node)
-
-cdef class Polygon:
-    cdef public np.ndarray vertices
-    cdef public np.ndarray normal
-
-    cpdef np.ndarray get_normal(self)
-
-    cpdef list to_triangles(self)
-
-    cpdef void flip(self)

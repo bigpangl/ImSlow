@@ -110,60 +110,38 @@ cdef class Plane:
     cpdef void split_triangle(self, Triangle triangle, list coplanarfront, list coplanarback, list front, list back):
         # 求三角形交点的方式是错误的
         cdef:
-            int COPLANAR = 0
-            int FRONT = 1
-            int BACK = 2
-            int SPANNING = 3
-            int triangle_type = 0
-            list types_all = []
-            list f_tmp, b_tmp
+            list check_cache = []
+            list on_vertex = []
+            list front_vertex = []
+            list back_vertex = []
 
-            np.ndarray vertice, vi, vj
-            float t_tmp
-            int type_tmp, i, j, ti, tj
+        for vertex in triangle.Vertices:
+            check_cache.append(self.distance(vertex))
+        for i in range(3):
+            vertex_i = triangle.Vertices[i]
+            if check_cache[i]==0:
+                on_vertex.append(vertex_i)
+                front_vertex.append(vertex_i)
+                back_vertex.append(vertex_i)
+            elif check_cache[i]>0:
+                front_vertex.append(vertex_i)
+            else:
+                back_vertex.append(vertex_i)
+            if check_cache[i]*check_cache[(i+1)%3]<0: # 异向
+                vertex_i_next = triangle.Vertices[(i+1)%3]
+                t = (self.W - self.Normal.dot(vertex_i)) / self.Normal.dot(vertex_i_next - vertex_i)  # 求交点
+                v = vertex_i + ((vertex_i_next - vertex_i) * t)
+                front_vertex.append(v)
+                back_vertex.append(v)
 
-        for vertice in triangle.Vertices:
-            t_tmp = self.distance(vertice)
-            # logging.debug(f"distance:{type_tmp}")
-            type_tmp = BACK if (t_tmp < -DISTANCE_EPSILON) else (FRONT if t_tmp > DISTANCE_EPSILON else COPLANAR)
-            triangle_type |= type_tmp
-            types_all.append(type_tmp)
+        if len(on_vertex)>=3:
+            self.get_triangles(on_vertex,(coplanarfront if self.Normal.dot(triangle.plane.Normal) > 0 else coplanarback))
+        else:
+            if len(front_vertex)>=3:
+                self.get_triangles(front_vertex,front)
+            if len(back_vertex)>=3:
+                self.get_triangles(back_vertex,back)
 
-        if triangle_type == COPLANAR:
-            # logging.debug(f"此处分割的三角形在coplanarfront/back 添加")
-            (coplanarfront if self.Normal.dot(triangle.plane.Normal) > 0 else coplanarback).append(triangle)
-        elif triangle_type == FRONT:
-            # logging.debug(f"此处分割的三角形在 front 添加")
-            front.append(triangle)
-        elif triangle_type == BACK:
-            # logging.debug(f"此处分割的三角形在 back 添加")
-            back.append(triangle)
-        elif triangle_type == SPANNING:  # 被分列开了
-            f_tmp = []
-            b_tmp = []
-            for i in range(len(triangle.Vertices)):
-                j = (i + 1) % (len(triangle.Vertices))
-                ti = types_all[i]
-                tj = types_all[j]
-
-                vi = triangle.Vertices[i].copy()
-                vj = triangle.Vertices[j].copy()
-
-                # 独立的点,存放在前后
-                if ti != BACK:
-                    f_tmp.append(vi)
-                if ti != FRONT:
-                    b_tmp.append(vi.copy() if ti != BACK else vi)  # 两边都添加点?
-
-                if (ti | tj) == SPANNING:
-                    t = (self.W - self.Normal.dot(vi)) / self.Normal.dot(vj - vi)  # 求交点
-                    v = vi + ((vj - vi) * t)
-                    f_tmp.append(v)
-                    b_tmp.append(v)
-            if len(f_tmp) >= 3:
-                self.get_triangles(f_tmp, front)
-            if len(b_tmp) >= 3:
-                self.get_triangles(b_tmp, back)
 
     #满足右手定则的顺序点，返回三角形,这是自己提供的方法
     cdef void get_triangles(self, list vertices, list triangles_back):
@@ -496,135 +474,3 @@ cdef class Node:
                 task_que.append((node_current.back, back))
                 # self.back.build(back)
 
-cdef class Polygon:
-    """
-    简单多边形的定义
-    """
-    def __cinit__(self, np.ndarray points):
-        self.vertices = points
-        self.normal = self.get_normal()
-
-    cpdef np.ndarray get_normal(self):
-
-        normal = None
-        for i in range(len(self.vertices) - 1):
-            point_i_front = self.vertices[i - 1]
-            point_i = self.vertices[i]
-            point_i_next = self.vertices[i + 1]
-            v1 = point_i_next - point_i
-            v2 = point_i_front - point_i
-            normal = np.cross(v1, v2)  # 多边形所在平面的法向量
-
-            front_points = 0
-            next_points = 0
-            plane = Plane.from_origin_normal(point_i, np.cross(normal, v2))
-            for point in self.vertices:
-                distnace_mid = plane.distance(point)
-                if distnace_mid > 0:
-                    front_points += 1
-                elif distnace_mid < 0:
-                    next_points += 1
-            if next_points > 0 and front_points > 0:
-                continue
-
-            front_points = 0
-            next_points = 0
-            plane = Plane.from_origin_normal(point_i, np.cross(normal, v1))
-
-            for point in self.vertices:
-                distnace_mid = plane.distance(point)
-                if distnace_mid > 0:
-                    front_points += 1
-                elif distnace_mid < 0:
-                    next_points += 1
-            if next_points > 0 and front_points > 0:
-                continue
-            break
-        return normal / np.linalg.norm(normal)
-
-    cpdef void flip(self):
-        self.vertices = np.flipud(self.vertices)
-        self.normal = self.normal * -1
-
-    cpdef list to_triangles(self):
-        points_plane_normal = self.get_normal()
-
-        trangles = []
-        linked = SingleLinkedNode(self.vertices[0])
-        linked_current = linked
-        linked_end = None  # 链表的尾巴
-
-        # 构建单向链表
-        for i in range(1, len(self.vertices)):
-            current_point = self.vertices[i]
-            linked_end = SingleLinkedNode(current_point)
-            linked_current.next = linked_end
-            linked_current = linked_end
-
-        linked_current = linked  # 指向链表的头
-        while True:
-            current_next = linked_current.next  # 第i+1
-            current_next_2 = current_next and current_next.next  # 第i+2
-            point_1 = linked_current.vertex
-            point_2 = current_next and current_next.vertex
-            point_3 = current_next_2 and current_next_2.vertex
-            if point_1 is not None and point_2 is not None and point_3 is not None:
-                # 判断不共点以及共线
-                if np.linalg.norm(point_1 - point_2) == 0:
-                    current_next.next = None  # 孤立此点
-                    linked_current.next = current_next_2  # head 位置未移动,少了一个点,本次逻辑中不会出现
-                    continue
-                if np.linalg.norm(point_3 - point_2) == 0:
-                    current_next.next = current_next_2.next
-                    current_next_2.next = None
-                    continue
-
-                v1 = point_1 - point_2
-                v2 = point_3 - point_2
-                normal_t = np.cross(v2, v1)
-                if np.linalg.norm(normal_t) == 0:  # 相邻三个点,共线
-                    current_next.next = current_next_2
-                    current_next.next = None
-                    continue
-
-                if 1 - get_cos_by(v1, v2) < 1e-5:
-                    # 共线三角形
-                    linked_current.next = current_next_2
-                    continue
-
-                triangle = Triangle(np.asarray([point_1, point_2, point_3]))
-                if get_cos_by(normal_t, points_plane_normal) > 0:
-                    # 凸角
-                    # 判断其他点不在此三角形内部
-                    node_check = current_next_2.next  # 从下一个点开始检查
-
-                    status = True
-                    while node_check:
-                        point_check = node_check.vertex
-                        status_check = triangle.vertex_in(point_check)
-                        if status_check <= 0:
-                            status = False
-                            break
-                        else:
-                            node_check = node_check.next
-
-                    if status:
-                        trangles.append(triangle)
-                        linked_current.next = current_next_2
-                        current_next.next = None
-
-                    else:
-                        # 是凸角但是有别的顶点在此三角形内部
-                        linked_end.next = linked_current
-                        linked_current.next = None
-                        linked_end = linked_current
-                        linked_current = current_next  # 滚动现在的顶角
-                else:
-                    # 不是凸角
-                    linked_end.next = linked_current
-                    linked_current.next = None
-                    linked_end = linked_current  # end 移动到真实位置
-                    linked_current = current_next  # 滚动现在的顶角
-            else:
-                break
-        return trangles

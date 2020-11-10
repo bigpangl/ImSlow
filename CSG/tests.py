@@ -65,6 +65,7 @@ def get_triangles_with_mesh(mesh):
 
 
 class CSGTest(unittest.TestCase):
+
     def test_plane_instance(self):
         """
         测试一个平面的定义,翻转,距离（分正负）
@@ -97,6 +98,7 @@ class CSGTest(unittest.TestCase):
 
         :return:
         """
+        logging.debug(f"开始计算")
         points_plane = np.asarray([
             [0, 0, 0],
             [0, 0, 1],
@@ -128,6 +130,7 @@ class CSGTest(unittest.TestCase):
         back = []
 
         plane.split_triangle(triangle, front, back, front, back)
+        logging.debug(f"结束计算：{len(front)},{len(back)}")
         self.assertEqual(len(front), 1, "front 需要为1个")
         self.assertEqual(len(back), 0, "back 不能有")
 
