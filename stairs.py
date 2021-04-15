@@ -71,7 +71,7 @@ for mesh in meshs:
     else:
         csg = csg.to_union(csg_mid)
 #
-add_length = 0
+add_length = 10
 open_holes = [{"x": 300.0, "y": 100.0, "z": 257, "r": 30.0, "d": {"x": 0, "y": 0, "z": -1},
                "length": 257 + add_length},
               {"x": 970.0, "y": 100.0, "z": 257.88366668686183, "r": 30, "d": {"x": 0, "y": 0, "z": -1},
@@ -93,12 +93,12 @@ for hole in open_holes:
     # holes.append(hole_mesh)
     #
     csg_mid = CSG.from_trianagles(Open3dTranslate.to_triangles(hole_mesh))
-    logging.debug(f"open hole 开口初始化CSG 完成")
+    logging.debug(f"初始化CSG 完成")
     if csg is None:
         csg = csg_mid
     else:
         csg = csg.to_subtract(csg_mid)
-    logging.debug(f"完成一个开口")
+    logging.debug(f"完成开口布尔运算")
 mesh = Open3dTranslate.to_mesh(csg.to_triangles())
 mesh = mesh.sample_points_uniformly(number_of_points=900000)
 #
